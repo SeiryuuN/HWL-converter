@@ -1,2 +1,2 @@
 # HWL-converter
-Convert .hwl to .funscript and back
+Allows you to convert .hwl to .funscript and back
