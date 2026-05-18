@@ -1,0 +1,1894 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HWL Converter</title>
+    <style>
+      :root {
+        --bg: #0b1120;
+        --panel: #111827;
+        --border: #1e293b;
+        --text: #cbd5e1;
+        --text-dim: #64748b;
+        --accent: #3b82f6;
+        --accent-hover: #2563eb;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        user-select: none;
+      }
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        overflow: hidden;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      #top-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .channel-row {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .panel-separator {
+        height: 4px;
+        background: var(--accent);
+        opacity: 0.6;
+        flex-shrink: 0;
+        z-index: 5;
+      }
+
+      /* Layers panel layout */
+      .layers-panel {
+        width: 60px;
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        padding: 12px 4px 0 4px;
+        gap: 4px;
+        align-items: center;
+        border-right: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .layer-buttons-container {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+      }
+      .channel-label {
+        font-size: 13px;
+        font-weight: 800;
+        color: var(--accent);
+        margin-bottom: 6px;
+        text-align: center;
+        width: 100%;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 4px;
+      }
+      .layer-btn {
+        width: 100%;
+        height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg);
+        color: var(--text-dim);
+        font-size: 9px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        line-height: 1.1;
+        gap: 2px;
+      }
+      .layer-btn span {
+        display: block;
+      }
+      .layer-btn.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+      }
+      .layer-btn:hover:not(.active) {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .layer-btn.dragging {
+        opacity: 0.5;
+      }
+
+      /* Drag indicator isolated from drop zone */
+      .drag-indicator {
+        font-size: 9px;
+        color: var(--text-dim);
+        opacity: 0.5;
+        text-align: center;
+        padding: 12px 0 4px 0;
+        letter-spacing: 0.5px;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      /* Canvas & controls */
+      .canvas-wrapper {
+        flex: 1;
+        position: relative;
+        background: #0f172a;
+        overflow: hidden;
+        cursor: grab;
+      }
+      .canvas-wrapper:active {
+        cursor: grabbing;
+      }
+      .canvas-wrapper canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      #controls-bar {
+        background: var(--panel);
+        padding: 6px 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        height: 38px;
+        flex-shrink: 0;
+      }
+      .time-display {
+        font-family: monospace;
+        font-size: 12px;
+        color: var(--accent);
+        min-width: 110px;
+        white-space: nowrap;
+        font-weight: 600;
+        margin-left: auto;
+      }
+      .zoom-btn {
+        width: 24px;
+        height: 24px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s;
+      }
+      .zoom-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--panel);
+      }
+      .timeline-slider {
+        flex: 1;
+        height: 5px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--bg);
+        border-radius: 3px;
+        outline: none;
+        cursor: pointer;
+        margin-left: 10px;
+      }
+      .timeline-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+        box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+      }
+      .toggle-btn {
+        padding: 4px 9px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text-dim);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+        transition: all 0.15s;
+      }
+      .toggle-btn.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+      }
+      .toggle-btn:hover:not(.active) {
+        border-color: var(--accent);
+      }
+
+      /* Bottom panel & grid */
+      #bottom-panel {
+        flex: 0 1 220px;
+        max-height: 40vh;
+        min-height: 160px;
+        background: var(--panel);
+        overflow-y: auto;
+        border-top: 1px solid var(--border);
+        padding: 8px;
+      }
+      .controls-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        height: 100%;
+      }
+      @media (max-width: 900px) {
+        .controls-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .section {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .section-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .file-label {
+        font-weight: 400;
+        font-size: 10px;
+        color: var(--text-dim);
+        font-style: italic;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+        text-align: right;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 5px;
+        flex-wrap: wrap;
+      }
+      .row:last-child {
+        margin-bottom: 0;
+      }
+      .sub-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 4px;
+      }
+      .sub-label {
+        font-size: 10px;
+        color: var(--text-dim);
+        margin: 0;
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .sub-separator {
+        height: 1px;
+        background: var(--border);
+        opacity: 0.6;
+        margin: 6px 0;
+        width: 100%;
+      }
+
+      /* Button variants */
+      .btn {
+        padding: 4px 8px;
+        border-radius: 4px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #cbd5e1;
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 500;
+        transition: all 0.15s;
+        flex-shrink: 0;
+      }
+      .btn:hover {
+        background: #253045;
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .btn:disabled,
+      .toggle-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+      .btn-import:disabled,
+      .btn-export:disabled,
+      .btn-convert:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+      .btn-convert {
+        background: #059669;
+        color: white;
+        border-color: #047857;
+        font-weight: 600;
+      }
+      .btn-convert:hover {
+        background: #10b981;
+        border-color: #059669;
+        color: white;
+      }
+      .btn-small {
+        padding: 3px 6px;
+      }
+      .btn-import {
+        background: #1e3a5f;
+        border-color: #2563eb;
+        color: #93c5fd;
+      }
+      .btn-import:hover {
+        background: #2563eb;
+        color: white;
+      }
+      .btn-export {
+        background: #3b1a4a;
+        border-color: #7c3aed;
+        color: #c4b5fd;
+      }
+      .btn-export:hover {
+        background: #7c3aed;
+        color: white;
+      }
+
+      input[type="file"] {
+        display: none;
+      }
+      select {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 4px;
+        padding: 4px 6px;
+        font-size: 11px;
+        outline: none;
+        flex: 1;
+        min-width: 0;
+      }
+      select:focus {
+        border-color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="top-panel">
+        <div class="channel-row" id="ch-a-row">
+          <div class="layers-panel" id="layers-a">
+            <div class="channel-label">A</div>
+            <div class="layer-buttons-container" id="layer-buttons-a">
+              <button
+                class="layer-btn active"
+                data-layer="hwlPos"
+                data-channel="A"
+              >
+                <span>HWL</span><span>Pos</span>
+              </button>
+              <button class="layer-btn" data-layer="hwlFreq" data-channel="A">
+                <span>HWL</span><span>Freq</span>
+              </button>
+              <button
+                class="layer-btn active"
+                data-layer="fsPos"
+                data-channel="A"
+              >
+                <span>FS</span><span>Pos</span>
+              </button>
+              <button class="layer-btn" data-layer="fsFreq" data-channel="A">
+                <span>FS</span><span>Freq</span>
+              </button>
+            </div>
+            <div class="drag-indicator">Drag to swap</div>
+          </div>
+          <div class="canvas-wrapper" id="wrap-a">
+            <canvas id="canvas-a"></canvas>
+          </div>
+        </div>
+        <div class="panel-separator"></div>
+        <div class="channel-row" id="ch-b-row">
+          <div class="layers-panel" id="layers-b">
+            <div class="channel-label">B</div>
+            <div class="layer-buttons-container" id="layer-buttons-b">
+              <button
+                class="layer-btn active"
+                data-layer="hwlPos"
+                data-channel="B"
+              >
+                <span>HWL</span><span>Pos</span>
+              </button>
+              <button class="layer-btn" data-layer="hwlFreq" data-channel="B">
+                <span>HWL</span><span>Freq</span>
+              </button>
+              <button
+                class="layer-btn active"
+                data-layer="fsPos"
+                data-channel="B"
+              >
+                <span>FS</span><span>Pos</span>
+              </button>
+              <button class="layer-btn" data-layer="fsFreq" data-channel="B">
+                <span>FS</span><span>Freq</span>
+              </button>
+            </div>
+            <div class="drag-indicator">Drag to swap</div>
+          </div>
+          <div class="canvas-wrapper" id="wrap-b">
+            <canvas id="canvas-b"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div id="controls-bar">
+        <button class="toggle-btn active" id="btn-points">Points</button>
+        <button class="zoom-btn" id="btn-zout">−</button>
+        <button class="zoom-btn" id="btn-zin">+</button>
+        <span class="time-display" id="time-display">0.00s / 0.00s</span>
+        <input
+          type="range"
+          class="timeline-slider"
+          id="timeline"
+          min="0"
+          max="10000"
+          value="50"
+        />
+      </div>
+
+      <div id="bottom-panel">
+        <div class="controls-grid">
+          <div class="section">
+            <div class="section-title">HWL</div>
+            <div class="sub-row">
+              <span class="sub-label">File</span
+              ><span class="file-label" id="lbl-hwl">empty</span>
+            </div>
+            <div class="row">
+              <button class="btn btn-small btn-import" data-target="f-hwl">
+                Import
+              </button>
+              <button class="btn btn-small btn-export" id="btn-exp-hwl">
+                Export
+              </button>
+            </div>
+            <div class="sub-separator"></div>
+            <div class="row">
+              <button
+                class="btn btn-small btn-convert"
+                id="btn-hwl-to-fs"
+                style="flex: 1"
+              >
+                Generate funscripts from HWL
+              </button>
+            </div>
+            <div class="sub-separator"></div>
+            <div class="row">
+              <select id="freq-algo-hwl" style="flex: 1">
+                <option value="channels">Freq: Channels</option>
+                <option value="fill0">Freq: 0</option>
+                <option value="fill50">Freq: 50</option>
+                <option value="fill100">Freq: 100</option>
+              </select>
+              <button
+                class="btn btn-small btn-convert"
+                id="btn-fs-to-hwl"
+                style="flex: 1"
+              >
+                Generate HWL from funscripts
+              </button>
+            </div>
+            <input type="file" id="f-hwl" accept=".hwl" />
+          </div>
+
+          <div class="section">
+            <div class="section-title">Funscript A</div>
+            <div class="sub-row">
+              <span class="sub-label">Position</span
+              ><span class="file-label" id="lbl-fsA-pos">empty</span>
+            </div>
+            <div class="row">
+              <button class="btn btn-small btn-import" data-target="f-fsA-pos">
+                Import
+              </button>
+              <button class="btn btn-small btn-export" id="btn-exp-fsA-pos">
+                Export
+              </button>
+            </div>
+            <div class="row">
+              <button class="btn btn-small" id="btn-simp-fsA-pos">
+                Simplify
+              </button>
+              <button class="btn btn-small" id="btn-fill-fsA-pos">Fill</button>
+              <button class="btn btn-small" id="btn-inv-fsA-pos">Invert</button>
+              <button class="btn btn-small" id="btn-fsA-to-stroker">
+                Adapt for stroker
+              </button>
+              <button class="btn btn-small" id="btn-fsA-to-estim">
+                Adapt for e-stim
+              </button>
+            </div>
+            <div class="sub-separator"></div>
+            <div class="sub-row">
+              <span class="sub-label">Frequency</span
+              ><span class="file-label" id="lbl-fsA-freq">empty</span>
+            </div>
+            <div class="row">
+              <button class="btn btn-small btn-import" data-target="f-fsA-freq">
+                Import
+              </button>
+              <button class="btn btn-small btn-export" id="btn-exp-fsA-freq">
+                Export
+              </button>
+            </div>
+            <div class="row">
+              <button class="btn btn-small" id="btn-simp-fsA-freq">
+                Simplify
+              </button>
+              <button class="btn btn-small" id="btn-fill-fsA-freq">Fill</button>
+              <button class="btn btn-small" id="btn-inv-fsA-freq">
+                Invert
+              </button>
+            </div>
+            <div class="row">
+              <button class="btn btn-small" id="btn-f0-fsA">0</button>
+              <button class="btn btn-small" id="btn-f50-fsA">50</button>
+              <button class="btn btn-small" id="btn-f100-fsA">100</button>
+              <button class="btn btn-small" id="btn-gen-fsA-freq">
+                Generate from Position
+              </button>
+            </div>
+            <input type="file" id="f-fsA-pos" accept=".funscript,.json" />
+            <input type="file" id="f-fsA-freq" accept=".funscript,.json" />
+          </div>
+
+          <div class="section">
+            <div class="section-title">Funscript B</div>
+            <div class="sub-row">
+              <span class="sub-label">Position</span
+              ><span class="file-label" id="lbl-fsB-pos">empty</span>
+            </div>
+            <div class="row">
+              <button class="btn btn-small btn-import" data-target="f-fsB-pos">
+                Import
+              </button>
+              <button class="btn btn-small btn-export" id="btn-exp-fsB-pos">
+                Export
+              </button>
+            </div>
+            <div class="row">
+              <button class="btn btn-small" id="btn-simp-fsB-pos">
+                Simplify
+              </button>
+              <button class="btn btn-small" id="btn-fill-fsB-pos">Fill</button>
+              <button class="btn btn-small" id="btn-inv-fsB-pos">Invert</button>
+              <button class="btn btn-small" id="btn-fsB-to-stroker">
+                Adapt for stroker
+              </button>
+              <button class="btn btn-small" id="btn-fsB-to-estim">
+                Adapt for e-stim
+              </button>
+            </div>
+            <div class="sub-separator"></div>
+            <div class="sub-row">
+              <span class="sub-label">Frequency</span
+              ><span class="file-label" id="lbl-fsB-freq">empty</span>
+            </div>
+            <div class="row">
+              <button class="btn btn-small btn-import" data-target="f-fsB-freq">
+                Import
+              </button>
+              <button class="btn btn-small btn-export" id="btn-exp-fsB-freq">
+                Export
+              </button>
+            </div>
+            <div class="row">
+              <button class="btn btn-small" id="btn-simp-fsB-freq">
+                Simplify
+              </button>
+              <button class="btn btn-small" id="btn-fill-fsB-freq">Fill</button>
+              <button class="btn btn-small" id="btn-inv-fsB-freq">
+                Invert
+              </button>
+            </div>
+            <div class="row">
+              <button class="btn btn-small" id="btn-f0-fsB">0</button>
+              <button class="btn btn-small" id="btn-f50-fsB">50</button>
+              <button class="btn btn-small" id="btn-f100-fsB">100</button>
+              <button class="btn btn-small" id="btn-gen-fsB-freq">
+                Generate from Position
+              </button>
+            </div>
+            <input type="file" id="f-fsB-pos" accept=".funscript,.json" />
+            <input type="file" id="f-fsB-freq" accept=".funscript,.json" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      ;(function () {
+        const STEP_MS = 25
+        const HWL_MAGIC = "YEAHBOI!"
+        const LAYERS = [
+          {
+            id: "hwlPos",
+            label: "H-Pos",
+            color: "#3b82f6",
+            isFs: false,
+            type: "pos",
+          },
+          {
+            id: "hwlFreq",
+            label: "H-Freq",
+            color: "#f59e0b",
+            isFs: false,
+            type: "freq",
+          },
+          {
+            id: "fsPos",
+            label: "F-Pos",
+            color: "#22d3ee",
+            isFs: true,
+            type: "pos",
+          },
+          {
+            id: "fsFreq",
+            label: "F-Freq",
+            color: "#e879f9",
+            isFs: true,
+            type: "freq",
+          },
+        ]
+
+        // Central state management
+        const state = {
+          channels: {
+            A: {
+              order: ["hwlPos", "fsPos", "hwlFreq", "fsFreq"],
+              active: new Set(["hwlPos", "fsPos"]),
+              channelData: { hwlPos: [], hwlFreq: [], fsPos: [], fsFreq: [] },
+              tangents: {},
+            },
+            B: {
+              order: ["hwlPos", "fsPos", "hwlFreq", "fsFreq"],
+              active: new Set(["hwlPos", "fsPos"]),
+              channelData: { hwlPos: [], hwlFreq: [], fsPos: [], fsFreq: [] },
+              tangents: {},
+            },
+          },
+          zoom: 100,
+          scrollX: 0.5,
+          maxTime: 0,
+          showPoints: true,
+          files: {
+            hwl: "empty",
+            hwlBase: null,
+            fsA_pos: "empty",
+            fsA_posBase: null,
+            fsA_freq: "empty",
+            fsA_freqBase: null,
+            fsB_pos: "empty",
+            fsB_posBase: null,
+            fsB_freq: "empty",
+            fsB_freqBase: null,
+          },
+          options: { freqAlgoHwl: "channels", tolerance: 1.5 },
+        }
+
+        const els = {
+          canvasA: document.getElementById("canvas-a"),
+          ctxA: null,
+          wrapA: document.getElementById("wrap-a"),
+          canvasB: document.getElementById("canvas-b"),
+          ctxB: null,
+          wrapB: document.getElementById("wrap-b"),
+          timeline: document.getElementById("timeline"),
+          timeDisplay: document.getElementById("time-display"),
+        }
+        els.ctxA = els.canvasA.getContext("2d")
+        els.ctxB = els.canvasB.getContext("2d")
+
+        // Resize canvas to match DPR and wrapper dimensions
+        function resizeCanvas(canvas, wrapper) {
+          const dpr = window.devicePixelRatio || 1
+          const r = wrapper.getBoundingClientRect()
+          if (!r.width || !r.height) return
+          canvas.width = r.width * dpr
+          canvas.height = r.height * dpr
+          canvas.style.width = r.width + "px"
+          canvas.style.height = r.height + "px"
+          canvas.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0)
+        }
+        function updateSizes() {
+          resizeCanvas(els.canvasA, els.wrapA)
+          resizeCanvas(els.canvasB, els.wrapB)
+          render()
+        }
+
+        // Compute monotonic cubic interpolation tangents
+        function computeTangents(pts) {
+          if (!pts || pts.length < 2) return {}
+          const n = pts.length,
+            m = new Float64Array(n - 1),
+            d = new Float64Array(n)
+          for (let i = 0; i < n - 1; i++)
+            m[i] =
+              pts[i + 1].at > pts[i].at
+                ? (pts[i + 1].pos - pts[i].pos) / (pts[i + 1].at - pts[i].at)
+                : 0
+          d[0] = m[0]
+          for (let i = 1; i < n - 1; i++) {
+            d[i] =
+              m[i - 1] * m[i] <= 0
+                ? 0
+                : (pts[i + 1].at - pts[i - 1].at) /
+                  ((pts[i].at - pts[i - 1].at) / m[i - 1] +
+                    (pts[i + 1].at - pts[i].at) / m[i])
+          }
+          d[n - 1] = m[n - 2]
+          for (let i = 0; i < n - 1; i++) {
+            const dt = pts[i + 1].at - pts[i].at
+            if (!dt) continue
+            const maxT = 3 * Math.abs(m[i])
+            d[i] = Math.sign(d[i]) * Math.min(Math.abs(d[i]), maxT)
+            d[i + 1] = Math.sign(d[i + 1]) * Math.min(Math.abs(d[i + 1]), maxT)
+          }
+          const out = {}
+          for (let i = 0; i < n - 1; i++)
+            out[i] = d[i] * (pts[i + 1].at - pts[i].at)
+          return out
+        }
+
+        // Parse binary HWL format
+        function parseHWL(buf) {
+          const dv = new DataView(buf)
+          let h = ""
+          for (let i = 0; i < 8; i++) h += String.fromCharCode(dv.getUint8(i))
+          if (h !== HWL_MAGIC) return null
+          const out = {
+            A: { hwlPos: [], hwlFreq: [] },
+            B: { hwlPos: [], hwlFreq: [] },
+          }
+          const pc = Math.floor((buf.byteLength - 8) / 16)
+          for (let i = 0; i < pc; i++) {
+            const o = 8 + i * 16,
+              t = i * STEP_MS
+            out.A.hwlPos.push({
+              at: t,
+              pos: Math.min(100, Math.max(0, dv.getFloat32(o, true) * 100)),
+            })
+            out.B.hwlPos.push({
+              at: t,
+              pos: Math.min(100, Math.max(0, dv.getFloat32(o + 4, true) * 100)),
+            })
+            out.A.hwlFreq.push({
+              at: t,
+              pos: Math.min(100, Math.max(0, dv.getFloat32(o + 8, true) * 100)),
+            })
+            out.B.hwlFreq.push({
+              at: t,
+              pos: Math.min(
+                100,
+                Math.max(0, dv.getFloat32(o + 12, true) * 100),
+              ),
+            })
+          }
+          return out
+        }
+
+        // Parse standard funscript JSON
+        function parseFS(t) {
+          try {
+            const j = JSON.parse(t)
+            return j.actions
+              ? j.actions.map((a) => ({
+                  at: a.at,
+                  pos: Math.min(100, Math.max(0, a.pos)),
+                }))
+              : []
+          } catch {
+            return []
+          }
+        }
+
+        // Simplify curve using perpendicular distance threshold
+        function simplify(pts, tol) {
+          if (!pts || pts.length < 3) return pts ? pts.slice() : []
+          const r = [pts[0]]
+          for (let i = 1; i < pts.length - 1; i++) {
+            if (pts[i + 1].at === pts[i - 1].at) continue
+            const e =
+              pts[i - 1].pos +
+              ((pts[i + 1].pos - pts[i - 1].pos) *
+                (pts[i].at - pts[i - 1].at)) /
+                (pts[i + 1].at - pts[i - 1].at)
+            if (Math.abs(pts[i].pos - e) > tol) r.push(pts[i])
+          }
+          r.push(pts[pts.length - 1])
+          return r
+        }
+
+        // Interpolate missing steps
+        function fillCurve(pts) {
+          if (!pts || pts.length < 2) return pts ? pts.slice() : []
+          const o = []
+          for (let i = 0; i < pts.length - 1; i++) {
+            const st = Math.max(
+              1,
+              Math.ceil((pts[i + 1].at - pts[i].at) / STEP_MS),
+            )
+            for (let s = 0; s < st; s++)
+              o.push({
+                at: pts[i].at + (s / st) * (pts[i + 1].at - pts[i].at),
+                pos: pts[i].pos + (s / st) * (pts[i + 1].pos - pts[i].pos),
+              })
+          }
+          o.push(pts[pts.length - 1])
+          return o
+        }
+
+        // Update state and recompute tangents
+        function setChannelData(ch, key, data) {
+          state.channels[ch].channelData[key] = data
+          state.channels[ch].tangents[key] = computeTangents(data)
+        }
+
+        // Load and parse files
+        function loadFile(type, file, ch, key) {
+          const r = new FileReader()
+          r.onload = (e) => {
+            try {
+              if (type === "hwl") {
+                const res = parseHWL(e.target.result)
+                if (!res) return
+                ;["A", "B"].forEach((c) => {
+                  setChannelData(
+                    c,
+                    "hwlPos",
+                    simplify(res[c].hwlPos, state.options.tolerance),
+                  )
+                  setChannelData(
+                    c,
+                    "hwlFreq",
+                    simplify(res[c].hwlFreq, state.options.tolerance),
+                  )
+                })
+                state.files.hwl = file.name
+                state.files.hwlBase = file.name.replace(/\.[^/.]+$/, "")
+                document.getElementById("lbl-hwl").textContent = file.name
+              } else {
+                const pts = parseFS(e.target.result)
+                setChannelData(ch, key, simplify(pts, state.options.tolerance))
+                if (key === "fsPos") {
+                  state.files[`fs${ch}_pos`] = file.name
+                  state.files[`fs${ch}_posBase`] = file.name.replace(
+                    /\.[^/.]+$/,
+                    "",
+                  )
+                  document.getElementById(`lbl-fs${ch}-pos`).textContent =
+                    file.name
+                } else {
+                  state.files[`fs${ch}_freq`] = file.name
+                  state.files[`fs${ch}_freqBase`] = file.name.replace(
+                    /\.[^/.]+$/,
+                    "",
+                  )
+                  document.getElementById(`lbl-fs${ch}-freq`).textContent =
+                    file.name
+                }
+              }
+              updateMaxTime()
+              render()
+            } catch (err) {
+              alert("Load failed: " + err.message)
+            }
+          }
+          type === "hwl" ? r.readAsArrayBuffer(file) : r.readAsText(file)
+        }
+
+        function updateMaxTime() {
+          let m = 0
+          ;["A", "B"].forEach((c) =>
+            Object.values(state.channels[c].channelData).forEach((d) => {
+              if (d?.length) m = Math.max(m, d[d.length - 1].at)
+            }),
+          )
+          state.maxTime = m
+          updateTime()
+        }
+
+        // Linear interpolation at specific time
+        function getValueAt(arr, t) {
+          if (!arr?.length) return 0
+          if (t <= arr[0].at) return arr[0].pos
+          if (t >= arr[arr.length - 1].at) return arr[arr.length - 1].pos
+          let i = 0
+          while (i < arr.length - 1 && arr[i + 1].at < t) i++
+          const dt = arr[i + 1].at - arr[i].at
+          return dt === 0
+            ? arr[i].pos
+            : arr[i].pos +
+                (arr[i + 1].pos - arr[i].pos) * ((t - arr[i].at) / dt)
+        }
+
+        // Zoom with focus preservation
+        function zoomAt(factor, focusRatio) {
+          if (state.maxTime <= 0) {
+            state.zoom = Math.min(5000, Math.max(1, state.zoom * factor))
+            return
+          }
+          const oldZoom = state.zoom,
+            newZoom = Math.min(5000, Math.max(1, oldZoom * factor))
+          if (Math.abs(newZoom - oldZoom) < 0.001) return
+          const visOld = state.maxTime / oldZoom,
+            visNew = state.maxTime / newZoom
+          const focusTime =
+            state.scrollX * (state.maxTime - visOld) + focusRatio * visOld
+          state.scrollX = Math.max(
+            0,
+            Math.min(
+              1,
+              (focusTime - focusRatio * visNew) / (state.maxTime - visNew),
+            ),
+          )
+          state.zoom = newZoom
+        }
+
+        // Draw smooth curve without overshoot
+        function drawCurve(ctx, sx, sy, tangents, topPad, hW, lineWidth) {
+          const n = sx.length
+          if (n < 2) return
+          ctx.lineWidth = lineWidth
+          ctx.beginPath()
+          ctx.moveTo(sx[0], sy[0])
+          for (let i = 0; i < n - 1; i++) {
+            const dx = sx[i + 1] - sx[i],
+              dy = sy[i + 1] - sy[i]
+            const cp1x = sx[i] + dx / 3,
+              cp1y = sy[i] + (tangents[i] * hW) / 300
+            const cp2x = sx[i + 1] - dx / 3,
+              cp2y = sy[i + 1] - (tangents[i] * hW) / 300
+            const minY = Math.min(sy[i], sy[i + 1]) - 2,
+              maxY = Math.max(sy[i], sy[i + 1]) + 2
+            const cp1Bulge = Math.abs(cp1y - sy[i]),
+              cp2Bulge = Math.abs(cp2y - sy[i + 1])
+            if (
+              cp1y >= minY &&
+              cp1y <= maxY &&
+              cp2y >= minY &&
+              cp2y <= maxY &&
+              cp1Bulge <= Math.max(2, Math.abs(dy) * 0.3) &&
+              cp2Bulge <= Math.max(2, Math.abs(dy) * 0.3)
+            ) {
+              ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, sx[i + 1], sy[i + 1])
+            } else {
+              ctx.lineTo(sx[i + 1], sy[i + 1])
+            }
+          }
+          ctx.stroke()
+        }
+
+        // Time axis labels
+        function drawTimeLabels(ctx, w, h, botPad, sX, scX, state) {
+          if (scX <= 0 || state.maxTime <= 0) return
+
+          const vT = w / scX
+
+          // Dynamic step selection based on visible range
+          let step
+          if (vT < 500) step = 50
+          else if (vT < 1000) step = 100
+          else if (vT < 2000) step = 200
+          else if (vT < 5000) step = 500
+          else if (vT < 10000) step = 1000
+          else if (vT < 30000) step = 2000
+          else if (vT < 60000) step = 5000
+          else if (vT < 120000) step = 10000
+          else step = 20000
+
+          const st = (sX / (w * state.zoom)) * state.maxTime
+          const et = st + vT
+          const first = Math.ceil(st / step) * step
+
+          ctx.fillStyle = "rgba(11,17,32,0.95)"
+          ctx.fillRect(0, h - botPad, w, botPad)
+          ctx.strokeStyle = "rgba(255,255,255,0.12)"
+          ctx.fillStyle = "#64748b"
+          ctx.font = "10px monospace"
+          ctx.textAlign = "center"
+          ctx.textBaseline = "top"
+
+          const minLabelSpacing = step < 1000 ? 60 : step < 5000 ? 80 : 100
+          let lastLabelX = -Infinity
+
+          for (let t = first; t <= et; t += step) {
+            const x = (t / state.maxTime) * (w * state.zoom) - sX
+            if (x < -10 || x > w + 10) continue
+            if (x - lastLabelX < minLabelSpacing) continue
+
+            ctx.beginPath()
+            ctx.moveTo(x, h - botPad)
+            ctx.lineTo(x, h - 2)
+            ctx.stroke()
+
+            const label =
+              step < 1000
+                ? (t / 1000).toFixed(2)
+                : step < 10000
+                  ? (t / 1000).toFixed(1)
+                  : (t / 1000).toFixed(0)
+            ctx.fillText(label, x, h - botPad + 2)
+            lastLabelX = x
+          }
+        }
+
+        // Main canvas renderer
+        function draw(canvas, ctx, ck) {
+          const w = canvas.width / (window.devicePixelRatio || 1),
+            h = canvas.height / (window.devicePixelRatio || 1)
+          ctx.fillStyle = "#0f172a"
+          ctx.fillRect(0, 0, w, h)
+          const ch = state.channels[ck]
+          if (h < 30 || w < 20) return
+          const topPad = 10,
+            botPad = 20,
+            hW = h - topPad - botPad
+          const visW = w * state.zoom,
+            sR = Math.max(1, visW - w),
+            sX = state.scrollX * sR
+          const scX = state.maxTime > 0 ? visW / state.maxTime : 0
+          ctx.save()
+          ctx.translate(-sX, 0)
+
+          const layers = []
+          ;[...ch.order].reverse().forEach((id) => {
+            if (!ch.active.has(id)) return
+            const info = LAYERS.find((l) => l.id === id),
+              pts = ch.channelData[id]
+            if (!pts || pts.length < 2 || scX <= 0) return
+            const tangents = ch.tangents[id],
+              n = pts.length
+            const sx = new Float64Array(n),
+              sy = new Float64Array(n)
+            for (let i = 0; i < n; i++) {
+              sx[i] = pts[i].at * scX
+              sy[i] = topPad + hW - (pts[i].pos / 100) * hW
+            }
+            layers.push({
+              id,
+              info,
+              sx,
+              sy,
+              tangents,
+              isPos: id.includes("Pos"),
+              type: info.type,
+            })
+          })
+
+          // Mask area above position curves
+          layers.forEach((layer) => {
+            if (!layer.isPos) return
+            ctx.save()
+            ctx.fillStyle = "#0f172a"
+            ctx.beginPath()
+            ctx.moveTo(0, topPad)
+            const n = layer.sx.length
+            ctx.lineTo(0, layer.sy[0])
+            for (let i = 0; i < n - 1; i++) {
+              const dx = layer.sx[i + 1] - layer.sx[i]
+              const cp1x = layer.sx[i] + dx / 3,
+                cp1y = layer.sy[i] + (layer.tangents[i] * hW) / 300
+              const cp2x = layer.sx[i + 1] - dx / 3,
+                cp2y = layer.sy[i + 1] - (layer.tangents[i] * hW) / 300
+              const minY = Math.min(layer.sy[i], layer.sy[i + 1]) - 2,
+                maxY = Math.max(layer.sy[i], layer.sy[i + 1]) + 2
+              if (cp1y >= minY && cp1y <= maxY && cp2y >= minY && cp2y <= maxY)
+                ctx.bezierCurveTo(
+                  cp1x,
+                  cp1y,
+                  cp2x,
+                  cp2y,
+                  layer.sx[i + 1],
+                  layer.sy[i + 1],
+                )
+              else ctx.lineTo(layer.sx[i + 1], layer.sy[i + 1])
+            }
+            ctx.lineTo(visW, topPad)
+            ctx.closePath()
+            ctx.fill()
+            ctx.restore()
+          })
+
+          // Grid lines
+          ctx.strokeStyle = "rgba(255,255,255,0.04)"
+          ctx.lineWidth = 1
+          for (let y = topPad; y <= h - botPad; y += hW / 5) {
+            ctx.beginPath()
+            ctx.moveTo(0, y)
+            ctx.lineTo(visW, y)
+            ctx.stroke()
+          }
+
+          // Determine lower/upper layers for thickness scaling
+          const posLayers = layers.filter((l) => l.type === "pos")
+          const freqLayers = layers.filter((l) => l.type === "freq")
+          const bottomPosId = posLayers.length > 0 ? posLayers[0].id : null
+          const bottomFreqId = freqLayers.length > 0 ? freqLayers[0].id : null
+
+          layers.forEach((layer) => {
+            const isBottom =
+              layer.id === bottomPosId || layer.id === bottomFreqId
+            const lw = isBottom ? 3 : 1.6,
+              ptR = isBottom ? 3.5 : 2
+            ctx.strokeStyle = layer.info.color
+            drawCurve(ctx, layer.sx, layer.sy, layer.tangents, topPad, hW, lw)
+            if (state.showPoints) {
+              ctx.fillStyle = layer.info.color
+              for (let i = 0; i < layer.sx.length; i++) {
+                ctx.beginPath()
+                ctx.arc(layer.sx[i], layer.sy[i], ptR, 0, Math.PI * 2)
+                ctx.fill()
+              }
+            }
+          })
+
+          ctx.restore()
+
+          drawTimeLabels(ctx, w, h, botPad, sX, scX, state)
+        }
+
+        function render() {
+          draw(els.canvasA, els.ctxA, "A")
+          draw(els.canvasB, els.ctxB, "B")
+          updateButtonStates()
+        }
+        function updateTime() {
+          const t = (els.timeline.value / 10000) * state.maxTime
+          els.timeDisplay.textContent = `${(t / 1000).toFixed(1)}s / ${(state.maxTime / 1000).toFixed(1)}s`
+        }
+        function updateTimelineFromScroll() {
+          if (state.maxTime <= 0) return
+          const mT = state.maxTime * (1 - 1 / state.zoom)
+          els.timeline.value = Math.round(
+            ((state.scrollX * mT) / state.maxTime) * 10000,
+          )
+          updateTime()
+        }
+
+        // Update button enabled states based on available data
+        function updateButtonStates() {
+          // HWL section
+          const hasHWL =
+            state.channels.A.channelData.hwlPos.length > 0 ||
+            state.channels.B.channelData.hwlPos.length > 0
+          const hasFS =
+            state.channels.A.channelData.fsPos.length > 0 ||
+            state.channels.A.channelData.fsFreq.length > 0 ||
+            state.channels.B.channelData.fsPos.length > 0 ||
+            state.channels.B.channelData.fsFreq.length > 0
+
+          const btnExpHWL = document.getElementById("btn-exp-hwl")
+          const btnHWLtoFS = document.getElementById("btn-hwl-to-fs")
+          const btnFStoHWL = document.getElementById("btn-fs-to-hwl")
+          if (btnExpHWL) btnExpHWL.disabled = !hasHWL
+          if (btnHWLtoFS) btnHWLtoFS.disabled = !hasHWL
+          if (btnFStoHWL) btnFStoHWL.disabled = !hasFS
+
+          // Funscript A section
+          const hasFSAPos = state.channels.A.channelData.fsPos.length > 0
+          const hasFSAFreq = state.channels.A.channelData.fsFreq.length > 0
+
+          ;[
+            "btn-exp-fsA-pos",
+            "btn-simp-fsA-pos",
+            "btn-fill-fsA-pos",
+            "btn-inv-fsA-pos",
+            "btn-fsA-to-stroker",
+            "btn-fsA-to-estim",
+            "btn-gen-fsA-freq",
+          ].forEach((id) => {
+            const el = document.getElementById(id)
+            if (el) el.disabled = !hasFSAPos
+          })
+          ;[
+            "btn-exp-fsA-freq",
+            "btn-simp-fsA-freq",
+            "btn-fill-fsA-freq",
+            "btn-inv-fsA-freq",
+            "btn-f0-fsA",
+            "btn-f50-fsA",
+            "btn-f100-fsA",
+          ].forEach((id) => {
+            const el = document.getElementById(id)
+            if (el) el.disabled = !hasFSAFreq
+          })
+
+          // Funscript B section
+          const hasFSBPos = state.channels.B.channelData.fsPos.length > 0
+          const hasFSBFreq = state.channels.B.channelData.fsFreq.length > 0
+
+          ;[
+            "btn-exp-fsB-pos",
+            "btn-simp-fsB-pos",
+            "btn-fill-fsB-pos",
+            "btn-inv-fsB-pos",
+            "btn-fsB-to-stroker",
+            "btn-fsB-to-estim",
+            "btn-gen-fsB-freq",
+          ].forEach((id) => {
+            const el = document.getElementById(id)
+            if (el) el.disabled = !hasFSBPos
+          })
+          ;[
+            "btn-exp-fsB-freq",
+            "btn-simp-fsB-freq",
+            "btn-fill-fsB-freq",
+            "btn-inv-fsB-freq",
+            "btn-f0-fsB",
+            "btn-f50-fsB",
+            "btn-f100-fsB",
+          ].forEach((id) => {
+            const el = document.getElementById(id)
+            if (el) el.disabled = !hasFSBFreq
+          })
+        }
+
+        // Layer toggle & drag/drop setup
+        function initLayers(ck) {
+          const container = document.getElementById(
+            `layer-buttons-${ck.toLowerCase()}`,
+          )
+          const bs = container.querySelectorAll(".layer-btn")
+          state.channels[ck].order = Array.from(bs).map((b) => b.dataset.layer)
+          function getDragAfterElement(container, y) {
+            const draggableElements = [
+              ...container.querySelectorAll(".layer-btn:not(.dragging)"),
+            ]
+            return draggableElements.reduce(
+              (closest, child) => {
+                const box = child.getBoundingClientRect(),
+                  offset = y - box.top - box.height / 2
+                return offset < 0 && offset > closest.offset
+                  ? { offset, element: child }
+                  : closest
+              },
+              { offset: Number.NEGATIVE_INFINITY },
+            ).element
+          }
+          bs.forEach((b) => {
+            b.draggable = true
+            b.onclick = () => {
+              state.channels[ck].active.has(b.dataset.layer)
+                ? state.channels[ck].active.delete(b.dataset.layer)
+                : state.channels[ck].active.add(b.dataset.layer)
+              b.classList.toggle("active")
+              render()
+            }
+            b.ondragstart = (e) => {
+              e.dataTransfer.setData("text/plain", b.dataset.layer)
+              b.classList.add("dragging")
+            }
+            b.ondragend = () => b.classList.remove("dragging")
+          })
+          // Only container accepts drops, indicator is ignored
+          container.ondragover = (e) => {
+            e.preventDefault()
+            const dragging = container.querySelector(".layer-btn.dragging")
+            if (!dragging) return
+            const afterElement = getDragAfterElement(container, e.clientY)
+            if (afterElement == null) container.appendChild(dragging)
+            else container.insertBefore(dragging, afterElement)
+          }
+          container.ondrop = (e) => {
+            e.preventDefault()
+            const dragging = container.querySelector(".layer-btn.dragging")
+            if (dragging) dragging.classList.remove("dragging")
+            state.channels[ck].order = Array.from(
+              container.querySelectorAll(".layer-btn"),
+            ).map((b) => b.dataset.layer)
+            render()
+          }
+        }
+
+        // Frequency generation from position velocity
+        function generateFrequencyFromPosition(posData) {
+          if (!posData || posData.length < 2) return []
+          const result = [],
+            windowMs = 700,
+            smoothing = 0.3
+          let prevFreq = 0
+          for (let i = 0; i < posData.length; i++) {
+            const t = posData[i].at
+            let sumVel = 0,
+              count = 0,
+              j = i
+            while (j >= 0 && t - posData[j].at <= windowMs) {
+              if (j < i) {
+                const dt = posData[j + 1].at - posData[j].at
+                const dp = Math.abs(posData[j + 1].pos - posData[j].pos)
+                if (dt > 0) sumVel += dp / dt
+              }
+              j--
+              count++
+            }
+            const avgVel = count > 1 ? sumVel / (count - 1) : 0
+            let rawFreq = Math.min(100, (avgVel / 0.18) * 100)
+            let freq =
+              i === 0 ? rawFreq : prevFreq + (rawFreq - prevFreq) * smoothing
+            freq = Math.max(0, Math.min(100, Math.round(freq)))
+            result.push({ at: t, pos: freq })
+            prevFreq = freq
+          }
+          return result
+        }
+
+        // Adapt for stroker: fill smooth sections with rhythmic pulses
+        function adaptForStroker(posData, freqData = null) {
+          if (!posData || posData.length < 2) return posData
+
+          const result = [posData[0]]
+
+          // Parameters
+          const MIN_PULSE_AMP = 12
+          const MAX_PULSE_AMP = 28
+          const MAX_SMOOTH_VELOCITY = 0.05 // pos/ms
+          const MAX_SEGMENT_DURATION = 1500 // ms
+
+          for (let i = 1; i < posData.length; i++) {
+            const prev = result[result.length - 1]
+            const curr = posData[i]
+
+            const dt = curr.at - prev.at
+            const dp = Math.abs(curr.pos - prev.pos)
+            const velocity = dt > 0 ? dp / dt : 0
+
+            let needsAdaptation = false
+
+            if (dt > MAX_SEGMENT_DURATION) {
+              needsAdaptation = true
+            }
+
+            if (
+              !needsAdaptation &&
+              dt > 150 &&
+              velocity < MAX_SMOOTH_VELOCITY
+            ) {
+              needsAdaptation = true
+            }
+
+            if (!needsAdaptation && dt > 200) {
+              let directionChanges = 0
+              let lastDir = 0
+
+              for (let k = i; k < Math.min(i + 5, posData.length - 1); k++) {
+                const diff = posData[k + 1].pos - posData[k].pos
+                const dir = diff > 0 ? 1 : diff < 0 ? -1 : 0
+
+                if (dir !== 0 && dir !== lastDir && lastDir !== 0) {
+                  directionChanges++
+                }
+                if (dir !== 0) lastDir = dir
+              }
+
+              if (directionChanges > 0 && i + 4 < posData.length) {
+                const spanTime =
+                  posData[Math.min(i + 4, posData.length - 1)].at -
+                  posData[i].at
+                if (spanTime > 0) {
+                  const oscFreq = directionChanges / (2 * (spanTime / 1000))
+                  if (oscFreq < 1.5) {
+                    needsAdaptation = true
+                  }
+                }
+              }
+            }
+
+            if (needsAdaptation && dt > 40) {
+              const baseFreq = freqData
+                ? Math.max(2.0, getValueAt(freqData, prev.at) / 20)
+                : 2.5
+              const pulseInterval = 1000 / baseFreq
+
+              let currentTime = prev.at
+              let pulsePhase = 0
+              const direction = curr.pos >= prev.pos ? 1 : -1
+
+              while (currentTime < curr.at - 30) {
+                const nextTime = Math.min(
+                  curr.at - 30,
+                  currentTime + pulseInterval,
+                )
+                const segmentDt = nextTime - currentTime
+
+                if (segmentDt > 20) {
+                  const midTime = Math.round(currentTime + segmentDt / 2)
+
+                  const progress = (midTime - prev.at) / (curr.at - prev.at)
+                  const basePos = prev.pos + (curr.pos - prev.pos) * progress
+
+                  const intensity = Math.max(0.2, basePos / 100)
+                  const amp = Math.round(
+                    MIN_PULSE_AMP + (MAX_PULSE_AMP - MIN_PULSE_AMP) * intensity,
+                  )
+
+                  const phase = pulsePhase * Math.PI
+                  const overshoot =
+                    direction * amp * (pulsePhase % 2 === 0 ? 0.7 : -0.4)
+
+                  const pulsePos = Math.max(
+                    0,
+                    Math.min(100, Math.round(basePos + overshoot)),
+                  )
+
+                  const last = result[result.length - 1]
+                  if (
+                    result.length === 0 ||
+                    Math.abs(pulsePos - last.pos) > 2 ||
+                    Math.abs(midTime - last.at) > 10
+                  ) {
+                    result.push({ at: midTime, pos: pulsePos })
+                  }
+                  pulsePhase++
+                }
+
+                currentTime = nextTime
+              }
+            }
+
+            if (
+              result.length === 0 ||
+              result[result.length - 1].at !== curr.at ||
+              result[result.length - 1].pos !== curr.pos
+            ) {
+              result.push(curr)
+            }
+          }
+          return result
+        }
+
+        // Adapt for e-stim
+        function adaptForEstim(posData) {
+          if (!posData || posData.length < 2) return posData
+          const result = posData.map((p) => ({ ...p })),
+            MAX_AMPLITUDE = 40
+          for (let i = 1; i < result.length; i++) {
+            const dp = result[i].pos - result[i - 1].pos
+            if (dp < -MAX_AMPLITUDE) {
+              result[i].pos = result[i - 1].pos - MAX_AMPLITUDE
+            }
+          }
+          return result
+        }
+
+        function invertScript(posData) {
+          if (!posData || posData.length === 0) return posData
+          return posData.map((p) => ({
+            at: p.at,
+            pos: Math.round(100 - p.pos),
+          }))
+        }
+
+        // Generate HWL by resampling funscript to 25ms grid
+        function generateHWLFromFS() {
+          let m = 0
+          ;["A", "B"].forEach((c) =>
+            ["fsPos", "fsFreq"].forEach((k) => {
+              const d = state.channels[c].channelData[k]
+              if (d?.length) m = Math.max(m, d[d.length - 1].at)
+            }),
+          )
+          if (!m) return alert("Import funscripts first")
+          const hwlData = {
+            A: { hwlPos: [], hwlFreq: [] },
+            B: { hwlPos: [], hwlFreq: [] },
+          }
+          ;["A", "B"].forEach((c) => {
+            ;["fsPos", "fsFreq"].forEach((fsKey) => {
+              const fsData = state.channels[c].channelData[fsKey],
+                hwlKey = fsKey === "fsPos" ? "hwlPos" : "hwlFreq"
+              const seen = new Map()
+              fsData.forEach((p) => seen.set(Math.round(p.at / 25) * 25, p.pos))
+              hwlData[c][hwlKey] = Array.from(seen.entries())
+                .map(([at, pos]) => ({ at, pos: Math.round(pos) }))
+                .sort((a, b) => a.at - b.at)
+            })
+          })
+          ;["A", "B"].forEach((c) => {
+            setChannelData(c, "hwlPos", hwlData[c].hwlPos)
+            setChannelData(c, "hwlFreq", hwlData[c].hwlFreq)
+          })
+          state.files.hwl = "from funscripts"
+          document.getElementById("lbl-hwl").textContent = "from funscripts"
+          state.files.hwlBase = null
+          updateMaxTime()
+          render()
+        }
+
+        // Export funscript as JSON
+        function exportFS(c, k) {
+          const d = state.channels[c].channelData[k]
+          if (!d?.length) return alert("Empty")
+
+          const suffixes = {
+            A: { fsPos: "_A", fsFreq: "_A_freq" },
+            B: { fsPos: "_B", fsFreq: "_B_freq" },
+          }
+          const suffix =
+            suffixes[c]?.[k] || `_${c}_${k.replace("fs", "").toLowerCase()}`
+
+          const baseKey = `${k}Base`
+          const baseName = state.files[baseKey] || "script"
+
+          const a = document.createElement("a")
+          a.href = URL.createObjectURL(
+            new Blob(
+              [
+                JSON.stringify(
+                  {
+                    version: "1.0",
+                    inverted: false,
+                    actions: d.map((p) => ({
+                      at: Math.round(p.at),
+                      pos: Math.round(p.pos),
+                    })),
+                  },
+                  null,
+                  2,
+                ),
+              ],
+              { type: "application/json" },
+            ),
+          )
+          a.download = `${baseName}${suffix}.funscript`
+          a.click()
+        }
+
+        // Export HWL binary
+        function exportHWL() {
+          let m = 0
+          ;["A", "B"].forEach((c) =>
+            Object.values(state.channels[c].channelData).forEach((d) => {
+              if (d?.length) m = Math.max(m, d[d.length - 1].at)
+            }),
+          )
+          if (!m) return alert("No data to export")
+
+          const buf = new ArrayBuffer(8 + Math.floor(m / STEP_MS) * 16 + 16),
+            dv = new DataView(buf)
+          for (let h = 0; h < 8; h++) dv.setUint8(h, "YEAHBOI!".charCodeAt(h))
+
+          const g = (c, k, idx) =>
+            Math.min(
+              1,
+              Math.max(
+                0,
+                getValueAt(state.channels[c].channelData[k], idx * 25) / 100,
+              ),
+            )
+          const f = state.options.freqAlgoHwl
+          for (let idx = 0; idx <= m / STEP_MS; idx++) {
+            dv.setFloat32(8 + idx * 16, g("A", "fsPos", idx), true)
+            dv.setFloat32(12 + idx * 16, g("B", "fsPos", idx), true)
+            const vA =
+              f === "fill0"
+                ? 0
+                : f === "fill50"
+                  ? 0.5
+                  : f === "fill100"
+                    ? 1
+                    : g("A", "fsFreq", idx)
+            const vB =
+              f === "fill0"
+                ? 0
+                : f === "fill50"
+                  ? 0.5
+                  : f === "fill100"
+                    ? 1
+                    : g("B", "fsFreq", idx)
+            dv.setFloat32(16 + idx * 16, vA, true)
+            dv.setFloat32(20 + idx * 16, vB, true)
+          }
+
+          const a = document.createElement("a")
+          a.href = URL.createObjectURL(
+            new Blob([buf], { type: "application/octet-stream" }),
+          )
+          a.download = `${state.files.hwlBase || "script"}.hwl`
+          a.click()
+        }
+
+        // Initialize UI & events
+        function init() {
+          document.getElementById("btn-points").onclick = function () {
+            state.showPoints = !state.showPoints
+            this.classList.toggle("active")
+            render()
+          }
+          document.getElementById("btn-zin").onclick = () => {
+            zoomAt(1.4, 0.5)
+            render()
+          }
+          document.getElementById("btn-zout").onclick = () => {
+            zoomAt(1 / 1.4, 0.5)
+            render()
+          }
+          els.timeline.oninput = () => {
+            updateTime()
+            if (state.maxTime <= 0) return
+            const mT = state.maxTime * (1 - 1 / state.zoom)
+            state.scrollX = Math.max(
+              0,
+              Math.min(1, ((els.timeline.value / 10000) * state.maxTime) / mT),
+            )
+            render()
+          }
+          ;["A", "B"].forEach((ck) => {
+            const wr = document.getElementById(`wrap-${ck.toLowerCase()}`)
+            wr.addEventListener("mousedown", (e) => {
+              if (e.button !== 0) return
+              const d = { sx: e.clientX, sc: state.scrollX }
+              const m = (ev) => {
+                state.scrollX = Math.max(
+                  0,
+                  Math.min(
+                    1,
+                    d.sc -
+                      (ev.clientX - d.sx) /
+                        Math.max(1, (state.zoom - 1) * wr.clientWidth),
+                  ),
+                )
+                updateTimelineFromScroll()
+                render()
+              }
+              const u = () => {
+                document.removeEventListener("mousemove", m)
+                document.removeEventListener("mouseup", u)
+              }
+              document.addEventListener("mousemove", m)
+              document.addEventListener("mouseup", u)
+            })
+            wr.addEventListener(
+              "wheel",
+              (e) => {
+                e.preventDefault()
+                const rect = wr.getBoundingClientRect(),
+                  mouseRatio = (e.clientX - rect.left) / rect.width
+                const dir = e.deltaY < 0 ? 1 : -1,
+                  dynMul = Math.max(0.05, 0.3 / Math.sqrt(state.zoom))
+                zoomAt(1 + dir * dynMul, mouseRatio)
+                render()
+              },
+              { passive: false },
+            )
+          })
+          ;["A", "B"].forEach(initLayers)
+          document.querySelectorAll(".btn-import").forEach((b) =>
+            b.addEventListener("click", (e) => {
+              const i = document.getElementById(b.dataset.target)
+              if (i) i.click()
+            }),
+          )
+
+          const bf = (id, t, c, k) => {
+            const i = document.getElementById(id)
+            if (i)
+              i.addEventListener("change", (e) => {
+                if (e.target.files[0]) loadFile(t, e.target.files[0], c, k)
+                e.target.value = ""
+              })
+          }
+          bf("f-hwl", "hwl")
+          bf("f-fsA-pos", "fs", "A", "fsPos")
+          bf("f-fsA-freq", "fs", "A", "fsFreq")
+          bf("f-fsB-pos", "fs", "B", "fsPos")
+          bf("f-fsB-freq", "fs", "B", "fsFreq")
+
+          const so = (id, fn) => {
+            const el = document.getElementById(id)
+            if (el) el.addEventListener("click", fn)
+          }
+          so("btn-exp-hwl", exportHWL)
+          so("btn-exp-fsA-pos", () => exportFS("A", "fsPos"))
+          so("btn-exp-fsA-freq", () => exportFS("A", "fsFreq"))
+          so("btn-exp-fsB-pos", () => exportFS("B", "fsPos"))
+          so("btn-exp-fsB-freq", () => exportFS("B", "fsFreq"))
+
+          const simpFn = (c, k) => {
+            setChannelData(
+              c,
+              k,
+              simplify(
+                state.channels[c].channelData[k],
+                state.options.tolerance,
+              ),
+            )
+            render()
+          }
+          so("btn-simp-fsA-pos", () => simpFn("A", "fsPos"))
+          so("btn-simp-fsA-freq", () => simpFn("A", "fsFreq"))
+          so("btn-simp-fsB-pos", () => simpFn("B", "fsPos"))
+          so("btn-simp-fsB-freq", () => simpFn("B", "fsFreq"))
+
+          const fillFn = (c, k) => {
+            setChannelData(c, k, fillCurve(state.channels[c].channelData[k]))
+            render()
+          }
+          so("btn-fill-fsA-pos", () => fillFn("A", "fsPos"))
+          so("btn-fill-fsA-freq", () => fillFn("A", "fsFreq"))
+          so("btn-fill-fsB-pos", () => fillFn("B", "fsPos"))
+          so("btn-fill-fsB-freq", () => fillFn("B", "fsFreq"))
+
+          so("btn-inv-fsA-pos", () => {
+            const d = state.channels.A.channelData.fsPos
+            if (!d?.length) return alert("No data to invert")
+            setChannelData("A", "fsPos", invertScript(d))
+            render()
+          })
+
+          so("btn-inv-fsA-freq", () => {
+            const d = state.channels.A.channelData.fsFreq
+            if (!d?.length) return alert("No data to invert")
+            setChannelData("A", "fsFreq", invertScript(d))
+            render()
+          })
+
+          so("btn-inv-fsB-pos", () => {
+            const d = state.channels.B.channelData.fsPos
+            if (!d?.length) return alert("No data to invert")
+            setChannelData("B", "fsPos", invertScript(d))
+            render()
+          })
+
+          so("btn-inv-fsB-freq", () => {
+            const d = state.channels.B.channelData.fsFreq
+            if (!d?.length) return alert("No data to invert")
+            setChannelData("B", "fsFreq", invertScript(d))
+            render()
+          })
+
+          const sf = (c, k, v) => {
+            const d = state.channels[c].channelData[k]
+            if (d) d.forEach((p) => (p.pos = v))
+            setChannelData(c, k, d)
+            render()
+          }
+          so("btn-f0-fsA", () => sf("A", "fsFreq", 0))
+          so("btn-f50-fsA", () => sf("A", "fsFreq", 50))
+          so("btn-f100-fsA", () => sf("A", "fsFreq", 100))
+          so("btn-f0-fsB", () => sf("B", "fsFreq", 0))
+          so("btn-f50-fsB", () => sf("B", "fsFreq", 50))
+          so("btn-f100-fsB", () => sf("B", "fsFreq", 100))
+
+          const gf = (c, pk, fk) => {
+            const pos = state.channels[c].channelData[pk]
+            if (!pos?.length) return
+            setChannelData(c, fk, generateFrequencyFromPosition(pos))
+            render()
+          }
+          so("btn-gen-fsA-freq", () => gf("A", "fsPos", "fsFreq"))
+          so("btn-gen-fsB-freq", () => gf("B", "fsPos", "fsFreq"))
+
+          const alHwl = document.getElementById("freq-algo-hwl")
+          if (alHwl)
+            alHwl.addEventListener(
+              "change",
+              (e) => (state.options.freqAlgoHwl = e.target.value),
+            )
+
+          so("btn-hwl-to-fs", () => {
+            if (!state.maxTime) return alert("Import HWL first")
+            ;["A", "B"].forEach((c) => {
+              if (state.channels[c].channelData.hwlPos.length)
+                setChannelData(
+                  c,
+                  "fsPos",
+                  state.channels[c].channelData.hwlPos.map((p) => ({ ...p })),
+                )
+              if (state.channels[c].channelData.hwlFreq.length)
+                setChannelData(
+                  c,
+                  "fsFreq",
+                  state.channels[c].channelData.hwlFreq.map((p) => ({ ...p })),
+                )
+            })
+            state.files.fsA_pos = "from HWL"
+            state.files.fsB_pos = "from HWL"
+            state.files.fsA_freq = "from HWL"
+            state.files.fsB_freq = "from HWL"
+            document.getElementById("lbl-fsA-pos").textContent = "from HWL"
+            document.getElementById("lbl-fsB-pos").textContent = "from HWL"
+            document.getElementById("lbl-fsA-freq").textContent = "from HWL"
+            document.getElementById("lbl-fsB-freq").textContent = "from HWL"
+            state.files.fsA_posBase = null
+            state.files.fsB_posBase = null
+            state.files.fsA_freqBase = null
+            state.files.fsB_freqBase = null
+            render()
+          })
+
+          so("btn-fs-to-hwl", generateHWLFromFS)
+
+          so("btn-fsA-to-stroker", () => {
+            const pos = state.channels.A.channelData.fsPos
+            const freq = state.channels.A.channelData.fsFreq
+            if (!pos?.length) return alert("Import funscript position first")
+            setChannelData("A", "fsPos", adaptForStroker(pos, freq))
+            render()
+          })
+          so("btn-fsB-to-stroker", () => {
+            const pos = state.channels.B.channelData.fsPos
+            const freq = state.channels.B.channelData.fsFreq
+            if (!pos?.length) return alert("Import funscript position first")
+            setChannelData("B", "fsPos", adaptForStroker(pos, freq))
+            render()
+          })
+          so("btn-fsA-to-estim", () => {
+            const pos = state.channels.A.channelData.fsPos
+            if (!pos?.length) return alert("Import funscript position first")
+            setChannelData("A", "fsPos", adaptForEstim(pos))
+            render()
+          })
+          so("btn-fsB-to-estim", () => {
+            const pos = state.channels.B.channelData.fsPos
+            if (!pos?.length) return alert("Import funscript position first")
+            setChannelData("B", "fsPos", adaptForEstim(pos))
+            render()
+          })
+
+          updateButtonStates()
+
+          window.addEventListener("resize", updateSizes)
+          updateSizes()
+        }
+
+        if (document.readyState === "loading")
+          document.addEventListener("DOMContentLoaded", init)
+        else init()
+      })()
+    </script>
+  </body>
+</html>
