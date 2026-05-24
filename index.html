@@ -34,6 +34,9 @@
         display: flex;
         flex-direction: column;
         height: 100vh;
+        transition:
+          opacity 0.2s,
+          filter 0.2s;
       }
       #top-panel {
         flex: 1;
@@ -106,10 +109,33 @@
         display: block;
       }
       .layer-btn.active {
-        background: var(--accent);
         color: white;
-        border-color: var(--accent);
-        box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+        box-shadow: 0 0 6px rgba(255, 255, 255, 0.2);
+      }
+
+      .layer-btn.active[data-layer="hwlPos"] {
+        background: #3b82f6;
+        color: #0f172a;
+        border-color: #3b82f6;
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+      }
+      .layer-btn.active[data-layer="hwlFreq"] {
+        background: #f59e0b;
+        color: #0f172a;
+        border-color: #f59e0b;
+        box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+      }
+      .layer-btn.active[data-layer="fsPos"] {
+        background: #22d3ee;
+        color: #0f172a;
+        border-color: #22d3ee;
+        box-shadow: 0 0 6px rgba(34, 211, 238, 0.5);
+      }
+      .layer-btn.active[data-layer="fsFreq"] {
+        background: #e879f9;
+        color: #0f172a;
+        border-color: #e879f9;
+        box-shadow: 0 0 6px rgba(232, 121, 249, 0.5);
       }
       .layer-btn:hover:not(.active) {
         border-color: var(--accent);
@@ -394,6 +420,38 @@
       select:focus {
         border-color: var(--accent);
       }
+
+      /* Conversion Popup */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 300;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      .modal-overlay.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .modal-content {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      }
+      .ui-blocked {
+        pointer-events: none !important;
+        opacity: 0.5 !important;
+        filter: grayscale(40%) !important;
+      }
     </style>
   </head>
   <body>
@@ -495,6 +553,26 @@
                 Export
               </button>
             </div>
+            <div class="row" style="margin-top: 2px">
+              <button
+                class="btn btn-small btn-import"
+                id="btn-imp-mp3"
+                style="flex: 1"
+              >
+                Import mp3 as HWL
+              </button>
+            </div>
+            <input type="file" id="f-mp3" accept=".mp3,.wav,.ogg,audio/*" />
+            <div class="row" style="margin-top: 2px">
+              <button
+                class="btn btn-small btn-import"
+                id="btn-imp-mp3-acc"
+                style="flex: 1"
+              >
+                Import mp3 as HWL (More accurate but longer)
+              </button>
+            </div>
+            <input type="file" id="f-mp3-acc" accept=".mp3,.wav,.ogg,audio/*" />
             <div class="sub-separator"></div>
             <div class="row">
               <button
@@ -645,6 +723,28 @@
             <input type="file" id="f-fsB-pos" accept=".funscript,.json" />
             <input type="file" id="f-fsB-freq" accept=".funscript,.json" />
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="conversion-popup" class="modal-overlay">
+      <div
+        class="modal-content"
+        style="text-align: center; width: 320px; padding: 24px"
+      >
+        <div
+          style="
+            font-size: 15px;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: var(--text);
+          "
+          id="popup-title"
+        >
+          Converting MP3 to HWL...
+        </div>
+        <div style="font-size: 13px; color: var(--text-dim); line-height: 1.5">
+          Audio is being processed. This may take a moment.
         </div>
       </div>
     </div>
@@ -835,21 +935,75 @@
           }
         }
 
-        // Simplify curve using perpendicular distance threshold
+        function getAudioDataOffset(buffer) {
+          const view = new DataView(buffer)
+
+          if (
+            buffer.byteLength > 10 &&
+            view.getUint8(0) === 0x49 &&
+            view.getUint8(1) === 0x44 &&
+            view.getUint8(2) === 0x33
+          ) {
+            const size =
+              ((view.getUint8(6) & 0x7f) << 21) |
+              ((view.getUint8(7) & 0x7f) << 14) |
+              ((view.getUint8(8) & 0x7f) << 7) |
+              (view.getUint8(9) & 0x7f)
+            return 10 + size
+          }
+
+          const maxScan = Math.min(buffer.byteLength - 1, 1024 * 1024)
+          for (let i = 0; i < maxScan; i++) {
+            if (
+              view.getUint8(i) === 0xff &&
+              (view.getUint8(i + 1) & 0xe0) === 0xe0
+            ) {
+              return i
+            }
+          }
+
+          return -1
+        }
+
         function simplify(pts, tol) {
           if (!pts || pts.length < 3) return pts ? pts.slice() : []
-          const r = [pts[0]]
-          for (let i = 1; i < pts.length - 1; i++) {
-            if (pts[i + 1].at === pts[i - 1].at) continue
-            const e =
-              pts[i - 1].pos +
-              ((pts[i + 1].pos - pts[i - 1].pos) *
-                (pts[i].at - pts[i - 1].at)) /
-                (pts[i + 1].at - pts[i - 1].at)
-            if (Math.abs(pts[i].pos - e) > tol) r.push(pts[i])
+
+          const stack = [[0, pts.length - 1]]
+          const keep = new Uint8Array(pts.length)
+          keep[0] = 1
+          keep[pts.length - 1] = 1
+
+          while (stack.length > 0) {
+            const [start, end] = stack.pop()
+            let dmax = 0
+            let index = 0
+
+            const dx = pts[end].at - pts[start].at
+            if (dx === 0) continue
+            const dy = pts[end].pos - pts[start].pos
+
+            for (let i = start + 1; i < end; i++) {
+              const expectedPos =
+                pts[start].pos + dy * ((pts[i].at - pts[start].at) / dx)
+              const d = Math.abs(pts[i].pos - expectedPos)
+              if (d > dmax) {
+                index = i
+                dmax = d
+              }
+            }
+
+            if (dmax > tol) {
+              keep[index] = 1
+              if (index - start > 1) stack.push([start, index])
+              if (end - index > 1) stack.push([index, end])
+            }
           }
-          r.push(pts[pts.length - 1])
-          return r
+
+          const result = []
+          for (let i = 0; i < pts.length; i++) {
+            if (keep[i]) result.push(pts[i])
+          }
+          return result
         }
 
         // Interpolate missing steps
@@ -1641,6 +1795,439 @@
           a.click()
         }
 
+        // --- Audio Converter Logic ---
+        const conversionPopup = document.getElementById("conversion-popup")
+        const popupTitle = document.getElementById("popup-title")
+
+        function showConversionPopup(title = "Converting audio...") {
+          popupTitle.textContent = title
+          conversionPopup.classList.add("open")
+          document.getElementById("app").classList.add("ui-blocked")
+        }
+
+        function hideConversionPopup() {
+          conversionPopup.classList.remove("open")
+          document.getElementById("app").classList.remove("ui-blocked")
+        }
+
+        async function convertAudioToHWL(audioFile) {
+          const MAX_SAFE_SIZE = 500 * 1024 * 1024
+          if (audioFile.size > MAX_SAFE_SIZE) {
+            throw new Error(
+              `File is too large (${(audioFile.size / 1024 / 1024).toFixed(1)}MB). Browsers cannot decompress files this large into RAM. Please use a shorter file or lower bitrate.`,
+            )
+          }
+
+          if (audioFile.size === 0) {
+            throw new Error("File is empty (0 bytes).")
+          }
+
+          const audioContext = new (
+            window.AudioContext || window.webkitAudioContext
+          )()
+
+          let arrayBuffer
+          try {
+            arrayBuffer = await new Promise((resolve, reject) => {
+              const reader = new FileReader()
+              reader.onload = () => resolve(reader.result)
+              reader.onerror = () =>
+                reject(new Error("Failed to read file from disk."))
+              reader.readAsArrayBuffer(audioFile)
+            })
+          } catch (e) {
+            audioContext.close()
+            throw e
+          }
+
+          let audioBuffer
+          try {
+            if (audioContext.state === "suspended") await audioContext.resume()
+            audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+          } catch (e) {
+            console.warn(
+              "Initial decode failed, attempting smart extraction...",
+              e,
+            )
+            try {
+              const offset = getAudioDataOffset(arrayBuffer)
+
+              if (offset === -1) {
+                throw new Error("No valid MP3 frames found.")
+              }
+
+              const cleanBuffer =
+                offset === 0 ? arrayBuffer : arrayBuffer.slice(offset)
+              audioBuffer = await audioContext.decodeAudioData(cleanBuffer)
+            } catch (e2) {
+              audioContext.close()
+              throw new Error(
+                `Unable to decode. The file may be corrupted, or it's unsupported and can't be played in browser`,
+              )
+            }
+          }
+
+          if (!audioBuffer || audioBuffer.duration <= 0.1) {
+            audioContext.close()
+            throw new Error(
+              "Audio file is empty, silent, or has zero duration.",
+            )
+          }
+
+          const STEP_MS = 25
+          const samplesPerPulse = Math.floor(
+            (audioBuffer.sampleRate * STEP_MS) / 1000,
+          )
+          const totalPulses = Math.floor(
+            audioBuffer.duration * (1000 / STEP_MS),
+          )
+          const leftCh = audioBuffer.getChannelData(0)
+          const rightCh =
+            audioBuffer.numberOfChannels > 1
+              ? audioBuffer.getChannelData(1)
+              : leftCh
+
+          const rawAmpsA = [],
+            rawAmpsB = [],
+            rawFreqsA = [],
+            rawFreqsB = []
+
+          const NOISE_THRESHOLD = 0.02
+
+          const cutoffFreq = 150
+          const RC = 1.0 / (2.0 * Math.PI * cutoffFreq)
+          const dt = 1.0 / audioBuffer.sampleRate
+          const alpha = dt / (RC + dt)
+
+          let lastFilteredL = 0,
+            lastFilteredR = 0
+
+          for (let p = 0; p < totalPulses; p++) {
+            const s = p * samplesPerPulse
+            const e = Math.min(s + samplesPerPulse, leftCh.length)
+            if (e - s < 10) break
+
+            let sumSqA = 0,
+              sumSqB = 0
+            let crossA = 0,
+              crossB = 0
+
+            let prevFilteredL = lastFilteredL
+            let prevFilteredR = lastFilteredR
+
+            for (let i = s; i < e; i++) {
+              const rawL = leftCh[i]
+              const rawR = rightCh[i]
+
+              sumSqA += rawL * rawL
+              sumSqB += rawR * rawR
+
+              const filteredL = lastFilteredL + alpha * (rawL - lastFilteredL)
+              const filteredR = lastFilteredR + alpha * (rawR - lastFilteredR)
+              lastFilteredL = filteredL
+              lastFilteredR = filteredR
+
+              if (
+                (prevFilteredL <= 0 && filteredL > 0) ||
+                (prevFilteredL >= 0 && filteredL < 0)
+              )
+                crossA++
+              if (
+                (prevFilteredR <= 0 && filteredR > 0) ||
+                (prevFilteredR >= 0 && filteredR < 0)
+              )
+                crossB++
+
+              prevFilteredL = filteredL
+              prevFilteredR = filteredR
+            }
+
+            const ampA = Math.sqrt(sumSqA / (e - s))
+            const ampB = Math.sqrt(sumSqB / (e - s))
+
+            const timeSec = (e - s) / audioBuffer.sampleRate
+
+            let freqA = 0,
+              freqB = 0
+            if (ampA > NOISE_THRESHOLD) freqA = crossA / timeSec / 2
+            if (ampB > NOISE_THRESHOLD) freqB = crossB / timeSec / 2
+
+            rawAmpsA.push(ampA)
+            rawAmpsB.push(ampB)
+            rawFreqsA.push(freqA)
+            rawFreqsB.push(freqB)
+
+            if (p % 500 === 0) await new Promise((r) => setTimeout(r, 0))
+          }
+
+          audioContext.close()
+
+          const p99 = (arr) => {
+            if (arr.length === 0) return 0.001
+            const sorted = [...arr].sort((a, b) => a - b)
+            return sorted[Math.floor(arr.length * 0.99)] || 0.001
+          }
+
+          const maxAmpA = p99(rawAmpsA)
+          const maxAmpB = p99(rawAmpsB)
+
+          const freqFloor = 20
+          const rawFreqsANormalized = rawFreqsA.map((f) =>
+            Math.max(0, f - freqFloor),
+          )
+          const rawFreqsBNormalized = rawFreqsB.map((f) =>
+            Math.max(0, f - freqFloor),
+          )
+
+          const maxFreqA = Math.max(p99(rawFreqsANormalized), 10)
+          const maxFreqB = Math.max(p99(rawFreqsBNormalized), 10)
+
+          const clamp = (v, mn, mx) => Math.max(mn, Math.min(mx, v))
+
+          const header = new TextEncoder().encode("YEAHBOI!")
+          const buf = new ArrayBuffer(8 + rawAmpsA.length * 16)
+          const view = new DataView(buf)
+          for (let i = 0; i < 8; i++) view.setUint8(i, header[i])
+
+          for (let i = 0; i < rawAmpsA.length; i++) {
+            const o = 8 + i * 16
+            view.setFloat32(o, clamp(rawAmpsA[i] / maxAmpA, 0, 1), true)
+            view.setFloat32(o + 4, clamp(rawAmpsB[i] / maxAmpB, 0, 1), true)
+            view.setFloat32(
+              o + 8,
+              clamp(rawFreqsANormalized[i] / maxFreqA, 0, 1),
+              true,
+            )
+            view.setFloat32(
+              o + 12,
+              clamp(rawFreqsBNormalized[i] / maxFreqB, 0, 1),
+              true,
+            )
+            if (i % 500 === 0) await new Promise((r) => setTimeout(r, 0))
+          }
+
+          return { buffer: buf }
+        }
+
+        // --- Accurate MP3 Converter ---
+        async function convertAudioToHWL_Accurate(audioFile) {
+          const audioContext = new (
+            window.AudioContext || window.webkitAudioContext
+          )()
+          let arrayBuffer = await new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result)
+            reader.onerror = () => reject(new Error("Failed to read file."))
+            reader.readAsArrayBuffer(audioFile)
+          })
+
+          let audioBuffer
+          try {
+            if (audioContext.state === "suspended") await audioContext.resume()
+            audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+          } catch (e) {
+            audioContext.close()
+            throw new Error("Unable to decode audio data.")
+          }
+
+          // Downsample to 16000Hz to make pitch detection feasible in JS
+          const targetSampleRate = 16000
+          const ratio = audioBuffer.sampleRate / targetSampleRate
+          const originalLeft = audioBuffer.getChannelData(0)
+          const originalRight =
+            audioBuffer.numberOfChannels > 1
+              ? audioBuffer.getChannelData(1)
+              : originalLeft
+
+          const newLength = Math.floor(originalLeft.length / ratio)
+          const leftCh = new Float32Array(newLength)
+          const rightCh = new Float32Array(newLength)
+
+          for (let i = 0; i < newLength; i++) {
+            leftCh[i] = originalLeft[Math.floor(i * ratio)]
+            rightCh[i] = originalRight[Math.floor(i * ratio)]
+          }
+
+          const STEP_MS = 25
+          const samplesPerPulse = Math.floor(
+            (targetSampleRate * STEP_MS) / 1000,
+          )
+          const totalPulses = Math.floor(newLength / samplesPerPulse)
+
+          const rawAmpsA = [],
+            rawAmpsB = [],
+            rawFreqsA = [],
+            rawFreqsB = []
+          const NOISE_THRESHOLD = 0.01
+
+          function detectPitch(samples) {
+            const n = samples.length
+            let bestTau = -1
+            let minDiff = Infinity
+
+            const minLag = 20
+            const maxLag = Math.min(320, Math.floor(n / 2))
+
+            for (let tau = minLag; tau <= maxLag; tau++) {
+              let diff = 0
+              for (let i = 0; i < n / 2; i++) {
+                const delta = samples[i] - samples[i + tau]
+                diff += delta * delta
+              }
+              if (diff < minDiff) {
+                minDiff = diff
+                bestTau = tau
+              }
+            }
+
+            if (bestTau > 0) return targetSampleRate / bestTau
+            return 0
+          }
+
+          for (let p = 0; p < totalPulses; p++) {
+            const s = p * samplesPerPulse
+            const e = s + samplesPerPulse
+
+            let sumSqA = 0,
+              sumSqB = 0
+            const windowL = leftCh.subarray(s, e)
+            const windowR = rightCh.subarray(s, e)
+
+            for (let i = 0; i < samplesPerPulse; i++) {
+              sumSqA += windowL[i] * windowL[i]
+              sumSqB += windowR[i] * windowR[i]
+            }
+
+            const ampA = Math.sqrt(sumSqA / samplesPerPulse)
+            const ampB = Math.sqrt(sumSqB / samplesPerPulse)
+
+            let freqA = 0,
+              freqB = 0
+            if (ampA > NOISE_THRESHOLD) freqA = detectPitch(windowL)
+            if (ampB > NOISE_THRESHOLD) freqB = detectPitch(windowR)
+
+            rawAmpsA.push(ampA)
+            rawAmpsB.push(ampB)
+            rawFreqsA.push(freqA)
+            rawFreqsB.push(freqB)
+
+            if (p % 200 === 0) {
+              const progress = Math.round((p / totalPulses) * 100)
+              popupTitle.textContent = `Converting MP3 (Accurate)... ${progress}%`
+              await new Promise((r) => setTimeout(r, 0))
+            }
+          }
+
+          audioContext.close()
+
+          const p995 = (arr) => {
+            if (arr.length === 0) return 0.001
+            const sorted = [...arr].sort((a, b) => a - b)
+            return sorted[Math.floor(arr.length * 0.995)] || 0.001
+          }
+
+          const maxAmpA = p995(rawAmpsA)
+          const maxAmpB = p995(rawAmpsB)
+
+          const validFreqsA = rawFreqsA.filter((f) => f > 50)
+          const validFreqsB = rawFreqsB.filter((f) => f > 50)
+          const maxFreqA = Math.max(
+            p995(validFreqsA.length ? validFreqsA : [200]),
+            200,
+          )
+          const maxFreqB = Math.max(
+            p995(validFreqsB.length ? validFreqsB : [200]),
+            200,
+          )
+
+          const clamp = (v, mn, mx) => Math.max(mn, Math.min(mx, v))
+          const header = new TextEncoder().encode("YEAHBOI!")
+          const buf = new ArrayBuffer(8 + rawAmpsA.length * 16)
+          const view = new DataView(buf)
+          for (let i = 0; i < 8; i++) view.setUint8(i, header[i])
+
+          for (let i = 0; i < rawAmpsA.length; i++) {
+            const o = 8 + i * 16
+            view.setFloat32(o, clamp(rawAmpsA[i] / maxAmpA, 0, 1), true)
+            view.setFloat32(o + 4, clamp(rawAmpsB[i] / maxAmpB, 0, 1), true)
+            view.setFloat32(o + 8, clamp(rawFreqsA[i] / maxFreqA, 0, 1), true)
+            view.setFloat32(o + 12, clamp(rawFreqsB[i] / maxFreqB, 0, 1), true)
+          }
+
+          return { buffer: buf }
+        }
+
+        async function handleMp3ImportAccurate(file) {
+          showConversionPopup("Converting MP3 (Accurate)... 0%")
+          await new Promise((r) => setTimeout(r, 50))
+
+          try {
+            const { buffer } = await convertAudioToHWL_Accurate(file)
+            const res = parseHWL(buffer)
+            if (!res) {
+              alert("Failed to parse generated HWL data.")
+              return
+            }
+            ;["A", "B"].forEach((c) => {
+              setChannelData(
+                c,
+                "hwlPos",
+                simplify(res[c].hwlPos, state.options.tolerance),
+              )
+              setChannelData(
+                c,
+                "hwlFreq",
+                simplify(res[c].hwlFreq, state.options.tolerance),
+              )
+            })
+            state.files.hwl = file.name + " (Accurate)"
+            state.files.hwlBase = file.name.replace(/\.[^/.]+$/, "")
+            document.getElementById("lbl-hwl").textContent =
+              file.name + " (Accurate)"
+            updateMaxTime()
+            render()
+          } catch (e) {
+            alert("Conversion failed: " + e.message)
+          } finally {
+            hideConversionPopup()
+          }
+        }
+
+        async function handleMp3Import(file) {
+          showConversionPopup("Converting MP3 to HWL...")
+          await new Promise((r) => setTimeout(r, 50))
+
+          try {
+            const { buffer } = await convertAudioToHWL(file)
+            const res = parseHWL(buffer)
+            if (!res) {
+              alert("Failed to parse generated HWL data.")
+              return
+            }
+            ;["A", "B"].forEach((c) => {
+              setChannelData(
+                c,
+                "hwlPos",
+                simplify(res[c].hwlPos, state.options.tolerance),
+              )
+              setChannelData(
+                c,
+                "hwlFreq",
+                simplify(res[c].hwlFreq, state.options.tolerance),
+              )
+            })
+            state.files.hwl = file.name
+            state.files.hwlBase = file.name.replace(/\.[^/.]+$/, "")
+            document.getElementById("lbl-hwl").textContent = file.name
+            updateMaxTime()
+            render()
+          } catch (e) {
+            alert("Conversion failed: " + e.message)
+          } finally {
+            hideConversionPopup()
+          }
+        }
+
         // Initialize UI & events
         function init() {
           document.getElementById("btn-points").onclick = function () {
@@ -1706,12 +2293,41 @@
             )
           })
           ;["A", "B"].forEach(initLayers)
-          document.querySelectorAll(".btn-import").forEach((b) =>
+          document.querySelectorAll(".btn-import").forEach((b) => {
+            if (b.id === "btn-imp-mp3") return
             b.addEventListener("click", (e) => {
               const i = document.getElementById(b.dataset.target)
               if (i) i.click()
-            }),
-          )
+            })
+          })
+
+          // MP3 Import handling
+          document
+            .getElementById("btn-imp-mp3")
+            .addEventListener("click", () => {
+              document.getElementById("f-mp3").click()
+            })
+          document.getElementById("f-mp3").addEventListener("change", (e) => {
+            if (e.target.files[0]) {
+              handleMp3Import(e.target.files[0])
+              e.target.value = ""
+            }
+          })
+
+          // Accurate MP3 Import handling
+          document
+            .getElementById("btn-imp-mp3-acc")
+            .addEventListener("click", () => {
+              document.getElementById("f-mp3-acc").click()
+            })
+          document
+            .getElementById("f-mp3-acc")
+            .addEventListener("change", (e) => {
+              if (e.target.files[0]) {
+                handleMp3ImportAccurate(e.target.files[0])
+                e.target.value = ""
+              }
+            })
 
           const bf = (id, t, c, k) => {
             const i = document.getElementById(id)
