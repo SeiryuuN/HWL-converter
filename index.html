@@ -1676,25 +1676,52 @@
             }),
           )
           if (!m) return alert("Import funscripts first")
+          
           const hwlData = {
             A: { hwlPos: [], hwlFreq: [] },
             B: { hwlPos: [], hwlFreq: [] },
           }
+          
+          const f = state.options.freqAlgoHwl
+          
           ;["A", "B"].forEach((c) => {
-            ;["fsPos", "fsFreq"].forEach((fsKey) => {
-              const fsData = state.channels[c].channelData[fsKey],
-                hwlKey = fsKey === "fsPos" ? "hwlPos" : "hwlFreq"
+            const fsPosData = state.channels[c].channelData.fsPos
+            if (fsPosData?.length) {
               const seen = new Map()
-              fsData.forEach((p) => seen.set(Math.round(p.at / 25) * 25, p.pos))
-              hwlData[c][hwlKey] = Array.from(seen.entries())
+              fsPosData.forEach((p) => seen.set(Math.round(p.at / 25) * 25, p.pos))
+              hwlData[c].hwlPos = Array.from(seen.entries())
                 .map(([at, pos]) => ({ at, pos: Math.round(pos) }))
                 .sort((a, b) => a.at - b.at)
-            })
+            }
+            
+            const fsFreqData = state.channels[c].channelData.fsFreq
+            if (fsFreqData?.length) {
+              const seen = new Map()
+              fsFreqData.forEach((p) => seen.set(Math.round(p.at / 25) * 25, p.pos))
+              hwlData[c].hwlFreq = Array.from(seen.entries())
+                .map(([at, pos]) => ({ at, pos: Math.round(pos) }))
+                .sort((a, b) => a.at - b.at)
+            } else {
+              let fillValue = 0
+              if (f === "fill50") fillValue = 50
+              else if (f === "fill100") fillValue = 100
+              
+              if (hwlData[c].hwlPos.length > 0) {
+                const startTime = hwlData[c].hwlPos[0].at
+                const endTime = hwlData[c].hwlPos[hwlData[c].hwlPos.length - 1].at
+                
+                for (let t = startTime; t <= endTime; t += 25) {
+                  hwlData[c].hwlFreq.push({ at: t, pos: fillValue })
+                }
+              }
+            }
           })
+          
           ;["A", "B"].forEach((c) => {
             setChannelData(c, "hwlPos", hwlData[c].hwlPos)
             setChannelData(c, "hwlFreq", hwlData[c].hwlFreq)
           })
+          
           state.files.hwl = "from funscripts"
           document.getElementById("lbl-hwl").textContent = "from funscripts"
           state.files.hwlBase = null
@@ -1744,49 +1771,42 @@
         // Export HWL binary
         function exportHWL() {
           let m = 0
-          ;["A", "B"].forEach((c) =>
-            Object.values(state.channels[c].channelData).forEach((d) => {
-              if (d?.length) m = Math.max(m, d[d.length - 1].at)
-            }),
-          )
-          if (!m) return alert("No data to export")
-
+          ;["A", "B"].forEach((c) => {
+            const hwlPos = state.channels[c].channelData.hwlPos
+            const hwlFreq = state.channels[c].channelData.hwlFreq
+            if (hwlPos?.length) m = Math.max(m, hwlPos[hwlPos.length - 1].at)
+            if (hwlFreq?.length) m = Math.max(m, hwlFreq[hwlFreq.length - 1].at)
+          })
+          
+          if (!m) return alert("No HWL data to export")
+        
           const buf = new ArrayBuffer(8 + Math.floor(m / STEP_MS) * 16 + 16),
             dv = new DataView(buf)
           for (let h = 0; h < 8; h++) dv.setUint8(h, "YEAHBOI!".charCodeAt(h))
-
-          const g = (c, k, idx) =>
-            Math.min(
-              1,
-              Math.max(
-                0,
-                getValueAt(state.channels[c].channelData[k], idx * 25) / 100,
-              ),
-            )
-          const f = state.options.freqAlgoHwl
-          for (let idx = 0; idx <= m / STEP_MS; idx++) {
-            dv.setFloat32(8 + idx * 16, g("A", "fsPos", idx), true)
-            dv.setFloat32(12 + idx * 16, g("B", "fsPos", idx), true)
-            const vA =
-              f === "fill0"
-                ? 0
-                : f === "fill50"
-                  ? 0.5
-                  : f === "fill100"
-                    ? 1
-                    : g("A", "fsFreq", idx)
-            const vB =
-              f === "fill0"
-                ? 0
-                : f === "fill50"
-                  ? 0.5
-                  : f === "fill100"
-                    ? 1
-                    : g("B", "fsFreq", idx)
-            dv.setFloat32(16 + idx * 16, vA, true)
-            dv.setFloat32(20 + idx * 16, vB, true)
+        
+          const getPosValue = (c, idx) => {
+            const hwlData = state.channels[c].channelData.hwlPos
+            if (hwlData && hwlData.length > 0) {
+              return Math.min(1, Math.max(0, getValueAt(hwlData, idx * 25) / 100))
+            }
+            return 0
           }
-
+        
+          const getFreqValue = (c, idx) => {
+            const hwlData = state.channels[c].channelData.hwlFreq
+            if (hwlData && hwlData.length > 0) {
+              return Math.min(1, Math.max(0, getValueAt(hwlData, idx * 25) / 100))
+            }
+            return 0
+          }
+        
+          for (let idx = 0; idx <= m / STEP_MS; idx++) {
+            dv.setFloat32(8 + idx * 16, getPosValue("A", idx), true)
+            dv.setFloat32(12 + idx * 16, getPosValue("B", idx), true)
+            dv.setFloat32(16 + idx * 16, getFreqValue("A", idx), true)
+            dv.setFloat32(20 + idx * 16, getFreqValue("B", idx), true)
+          }
+        
           const a = document.createElement("a")
           a.href = URL.createObjectURL(
             new Blob([buf], { type: "application/octet-stream" }),
