@@ -851,7 +851,7 @@
 
         // Compute monotonic cubic interpolation tangents
         function computeTangents(pts) {
-          if (!pts || pts.length < 2) return {}
+          if (!pts || pts.length < 2) return new Float64Array(0)
           const n = pts.length,
             m = new Float64Array(n - 1),
             d = new Float64Array(n)
@@ -877,7 +877,7 @@
             d[i] = Math.sign(d[i]) * Math.min(Math.abs(d[i]), maxT)
             d[i + 1] = Math.sign(d[i + 1]) * Math.min(Math.abs(d[i + 1]), maxT)
           }
-          const out = {}
+          const out = new Float64Array(n - 1)
           for (let i = 0; i < n - 1; i++)
             out[i] = d[i] * (pts[i + 1].at - pts[i].at)
           return out
@@ -1110,7 +1110,7 @@
         }
 
         // Zoom with focus preservation
-        function zoomAt(factor, focusRatio) {
+        function zoomAt(factor, focusRatio, canvasWidth) {
           if (state.maxTime <= 0) {
             state.zoom = Math.min(5000, Math.max(1, state.zoom * factor))
             return
@@ -1118,49 +1118,77 @@
           const oldZoom = state.zoom,
             newZoom = Math.min(5000, Math.max(1, oldZoom * factor))
           if (Math.abs(newZoom - oldZoom) < 0.001) return
-          const visOld = state.maxTime / oldZoom,
-            visNew = state.maxTime / newZoom
-          const focusTime =
-            state.scrollX * (state.maxTime - visOld) + focusRatio * visOld
-          state.scrollX = Math.max(
-            0,
-            Math.min(
-              1,
-              (focusTime - focusRatio * visNew) / (state.maxTime - visNew),
-            ),
-          )
+
+          const w = canvasWidth
+          const marginPx = w * 0.1
+          const visW_Old = w * oldZoom
+          const scX_Old = visW_Old / state.maxTime
+          const sR_Old = Math.max(1, visW_Old - w + marginPx * 2)
+          const sX_Old = state.scrollX * sR_Old - marginPx
+
+          const tStart_Old = sX_Old / scX_Old
+          const visibleTime_Old = w / scX_Old
+          const focusTime = tStart_Old + focusRatio * visibleTime_Old
+
+          const visW_New = w * newZoom
+          const scX_New = visW_New / state.maxTime
+          const sR_New = Math.max(1, visW_New - w + marginPx * 2)
+          const visibleTime_New = w / scX_New
+
+          const tStart_New = focusTime - focusRatio * visibleTime_New
+          const sX_New = tStart_New * scX_New
+
+          const newScrollX = (sX_New + marginPx) / sR_New
+          state.scrollX = Math.max(0, Math.min(1, newScrollX))
           state.zoom = newZoom
         }
 
-        // Draw smooth curve without overshoot
-        function drawCurve(ctx, sx, sy, tangents, topPad, hW, lineWidth) {
+        // Draw smooth curve
+        function drawCurveOptimized(
+          ctx,
+          sx,
+          sy,
+          tangents,
+          topPad,
+          hW,
+          lineWidth,
+          useLineTo,
+        ) {
           const n = sx.length
           if (n < 2) return
           ctx.lineWidth = lineWidth
           ctx.beginPath()
           ctx.moveTo(sx[0], sy[0])
-          for (let i = 0; i < n - 1; i++) {
-            const dx = sx[i + 1] - sx[i],
-              dy = sy[i + 1] - sy[i]
-            const cp1x = sx[i] + dx / 3,
-              cp1y = sy[i] + (tangents[i] * hW) / 300
-            const cp2x = sx[i + 1] - dx / 3,
-              cp2y = sy[i + 1] - (tangents[i] * hW) / 300
-            const minY = Math.min(sy[i], sy[i + 1]) - 2,
-              maxY = Math.max(sy[i], sy[i + 1]) + 2
-            const cp1Bulge = Math.abs(cp1y - sy[i]),
-              cp2Bulge = Math.abs(cp2y - sy[i + 1])
-            if (
-              cp1y >= minY &&
-              cp1y <= maxY &&
-              cp2y >= minY &&
-              cp2y <= maxY &&
-              cp1Bulge <= Math.max(2, Math.abs(dy) * 0.3) &&
-              cp2Bulge <= Math.max(2, Math.abs(dy) * 0.3)
-            ) {
-              ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, sx[i + 1], sy[i + 1])
-            } else {
-              ctx.lineTo(sx[i + 1], sy[i + 1])
+
+          if (useLineTo) {
+            for (let i = 1; i < n; i++) {
+              ctx.lineTo(sx[i], sy[i])
+            }
+          } else {
+            for (let i = 0; i < n - 1; i++) {
+              const dx = sx[i + 1] - sx[i],
+                dy = sy[i + 1] - sy[i]
+              const cp1x = sx[i] + dx / 3,
+                cp1y = sy[i] + (tangents[i] * hW) / 300
+              const cp2x = sx[i + 1] - dx / 3,
+                cp2y = sy[i + 1] - (tangents[i] * hW) / 300
+              const minY = Math.min(sy[i], sy[i + 1]) - 2,
+                maxY = Math.max(sy[i], sy[i + 1]) + 2
+              const cp1Bulge = Math.abs(cp1y - sy[i]),
+                cp2Bulge = Math.abs(cp2y - sy[i + 1])
+
+              if (
+                cp1y >= minY &&
+                cp1y <= maxY &&
+                cp2y >= minY &&
+                cp2y <= maxY &&
+                cp1Bulge <= Math.max(2, Math.abs(dy) * 0.3) &&
+                cp2Bulge <= Math.max(2, Math.abs(dy) * 0.3)
+              ) {
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, sx[i + 1], sy[i + 1])
+              } else {
+                ctx.lineTo(sx[i + 1], sy[i + 1])
+              }
             }
           }
           ctx.stroke()
@@ -1170,23 +1198,8 @@
         function drawTimeLabels(ctx, w, h, botPad, sX, scX, state) {
           if (scX <= 0 || state.maxTime <= 0) return
 
-          const vT = w / scX
-
-          // Dynamic step selection based on visible range
-          let step
-          if (vT < 500) step = 50
-          else if (vT < 1000) step = 100
-          else if (vT < 2000) step = 200
-          else if (vT < 5000) step = 500
-          else if (vT < 10000) step = 1000
-          else if (vT < 30000) step = 2000
-          else if (vT < 60000) step = 5000
-          else if (vT < 120000) step = 10000
-          else step = 20000
-
-          const st = (sX / (w * state.zoom)) * state.maxTime
-          const et = st + vT
-          const first = Math.ceil(st / step) * step
+          const ticks = computeTimeTicks(w, sX, scX, state)
+          const step = getTimeStep(w / scX)
 
           ctx.fillStyle = "rgba(11,17,32,0.95)"
           ctx.fillRect(0, h - botPad, w, botPad)
@@ -1196,14 +1209,8 @@
           ctx.textAlign = "center"
           ctx.textBaseline = "top"
 
-          const minLabelSpacing = step < 1000 ? 60 : step < 5000 ? 80 : 100
-          let lastLabelX = -Infinity
-
-          for (let t = first; t <= et; t += step) {
-            const x = (t / state.maxTime) * (w * state.zoom) - sX
-            if (x < -10 || x > w + 10) continue
-            if (x - lastLabelX < minLabelSpacing) continue
-
+          for (let i = 0; i < ticks.length; i++) {
+            const { t, x } = ticks[i]
             ctx.beginPath()
             ctx.moveTo(x, h - botPad)
             ctx.lineTo(x, h - 2)
@@ -1216,8 +1223,41 @@
                   ? (t / 1000).toFixed(1)
                   : (t / 1000).toFixed(0)
             ctx.fillText(label, x, h - botPad + 2)
-            lastLabelX = x
           }
+        }
+
+        // Calculate time step based on visible time range
+        function getTimeStep(visibleTime) {
+          if (visibleTime < 500) return 10
+          if (visibleTime < 1000) return 100
+          if (visibleTime < 2000) return 200
+          if (visibleTime < 5000) return 500
+          if (visibleTime < 10000) return 1000
+          if (visibleTime < 30000) return 2000
+          if (visibleTime < 60000) return 5000
+          if (visibleTime < 120000) return 10000
+          return 20000
+        }
+
+        function computeTimeTicks(w, sX, scX, state) {
+          const ticks = []
+          if (scX <= 0 || state.maxTime <= 0) return ticks
+          const vT = w / scX
+          const step = getTimeStep(vT)
+          const st = (sX / (w * state.zoom)) * state.maxTime
+          const et = st + vT
+          const first = Math.ceil(st / step) * step
+          const minLabelSpacing = step < 1000 ? 60 : step < 5000 ? 80 : 100
+          let lastX = -Infinity
+          for (let t = first; t <= et; t += step) {
+            if (t < 0 || t > state.maxTime) continue
+            const x = (t / state.maxTime) * (w * state.zoom) - sX
+            if (x < -10 || x > w + 10) continue
+            if (x - lastX < minLabelSpacing) continue
+            ticks.push({ t, x })
+            lastX = x
+          }
+          return ticks
         }
 
         // Main canvas renderer
@@ -1231,12 +1271,22 @@
           const topPad = 10,
             botPad = 20,
             hW = h - topPad - botPad
+
+          // Overscroll margin
+          const marginPx = w * 0.1
+
           const visW = w * state.zoom,
-            sR = Math.max(1, visW - w),
-            sX = state.scrollX * sR
+            sR = Math.max(1, visW - w + marginPx * 2),
+            sX = state.scrollX * sR - marginPx
           const scX = state.maxTime > 0 ? visW / state.maxTime : 0
+
           ctx.save()
           ctx.translate(-sX, 0)
+          ctx.beginPath()
+          ctx.rect(0, 0, visW, h)
+          ctx.clip()
+
+          const cullBufferPx = 50
 
           const layers = []
           ;[...ch.order].reverse().forEach((id) => {
@@ -1246,18 +1296,131 @@
             if (!pts || pts.length < 2 || scX <= 0) return
             const tangents = ch.tangents[id],
               n = pts.length
-            const sx = new Float64Array(n),
-              sy = new Float64Array(n)
-            for (let i = 0; i < n; i++) {
-              sx[i] = pts[i].at * scX
-              sy[i] = topPad + hW - (pts[i].pos / 100) * hW
+
+            // Culling
+            let startIdx = 0,
+              endIdx = n
+            if (scX > 0) {
+              const cullStartPx = sX - cullBufferPx
+              const cullEndPx = sX + w + cullBufferPx
+              const cullStartTime = cullStartPx / scX
+              const cullEndTime = cullEndPx / scX
+
+              let low = 0,
+                high = n
+              while (low < high) {
+                const mid = (low + high) >>> 1
+                if (pts[mid].at < cullStartTime) low = mid + 1
+                else high = mid
+              }
+              startIdx = Math.max(0, low - 2)
+
+              low = startIdx
+              high = n
+              while (low < high) {
+                const mid = (low + high) >>> 1
+                if (pts[mid].at <= cullEndTime) low = mid + 1
+                else high = mid
+              }
+              endIdx = Math.min(n, low + 2)
             }
+
+            const slicedN = endIdx - startIdx
+            if (slicedN < 2) return
+
+            // LOD
+            const MAX_BEZIER_POINTS = 2000
+            const MAX_LINE_POINTS = 4000
+
+            let useLineTo = false
+            let forceHidePoints = false
+            let renderSx, renderSy, renderTangents
+
+            if (slicedN > MAX_LINE_POINTS) {
+              useLineTo = true
+              forceHidePoints = true
+              const buckets = Math.floor(MAX_LINE_POINTS / 4)
+              const bucketSize = slicedN / buckets
+
+              const tmpSx = new Float64Array(buckets * 4 + 1)
+              const tmpSy = new Float64Array(buckets * 4 + 1)
+              let idx = 0
+
+              for (let i = 0; i < buckets; i++) {
+                const bStart = Math.floor(i * bucketSize)
+                const bEnd = Math.min(slicedN, Math.floor((i + 1) * bucketSize))
+                if (bStart >= bEnd) continue
+
+                let minJ = bStart,
+                  maxJ = bStart
+                let minP = pts[startIdx + bStart].pos,
+                  maxP = pts[startIdx + bStart].pos
+
+                for (let j = bStart + 1; j < bEnd; j++) {
+                  const p = pts[startIdx + j].pos
+                  if (p < minP) {
+                    minP = p
+                    minJ = j
+                  }
+                  if (p > maxP) {
+                    maxP = p
+                    maxJ = j
+                  }
+                }
+
+                const indices = [bStart, minJ, maxJ, bEnd - 1]
+                indices.sort((a, b) => a - b)
+
+                let lastAdded = -1
+                for (let k = 0; k < 4; k++) {
+                  const j = indices[k]
+                  if (j === lastAdded) continue
+                  const pt = pts[startIdx + j]
+                  tmpSx[idx] = pt.at * scX
+                  tmpSy[idx] = topPad + hW - (pt.pos / 100) * hW
+                  idx++
+                  lastAdded = j
+                }
+              }
+
+              renderSx = tmpSx.slice(0, idx)
+              renderSy = tmpSy.slice(0, idx)
+              renderTangents = null
+            } else if (slicedN > MAX_BEZIER_POINTS) {
+              useLineTo = true
+              if (slicedN > w * 0.5) forceHidePoints = true
+
+              renderSx = new Float64Array(slicedN)
+              renderSy = new Float64Array(slicedN)
+              for (let i = 0; i < slicedN; i++) {
+                const pt = pts[startIdx + i]
+                renderSx[i] = pt.at * scX
+                renderSy[i] = topPad + hW - (pt.pos / 100) * hW
+              }
+              renderTangents = null
+            } else {
+              if (slicedN > w * 0.5) forceHidePoints = true
+
+              renderSx = new Float64Array(slicedN)
+              renderSy = new Float64Array(slicedN)
+              renderTangents = new Float64Array(slicedN - 1)
+
+              for (let i = 0; i < slicedN; i++) {
+                const pt = pts[startIdx + i]
+                renderSx[i] = pt.at * scX
+                renderSy[i] = topPad + hW - (pt.pos / 100) * hW
+                if (i < slicedN - 1) renderTangents[i] = tangents[startIdx + i]
+              }
+            }
+
             layers.push({
               id,
               info,
-              sx,
-              sy,
-              tangents,
+              sx: renderSx,
+              sy: renderSy,
+              tangents: renderTangents,
+              useLineTo,
+              forceHidePoints,
               isPos: id.includes("Pos"),
               type: info.type,
             })
@@ -1269,35 +1432,63 @@
             ctx.save()
             ctx.fillStyle = "#0f172a"
             ctx.beginPath()
-            ctx.moveTo(0, topPad)
             const n = layer.sx.length
-            ctx.lineTo(0, layer.sy[0])
-            for (let i = 0; i < n - 1; i++) {
-              const dx = layer.sx[i + 1] - layer.sx[i]
-              const cp1x = layer.sx[i] + dx / 3,
-                cp1y = layer.sy[i] + (layer.tangents[i] * hW) / 300
-              const cp2x = layer.sx[i + 1] - dx / 3,
-                cp2y = layer.sy[i + 1] - (layer.tangents[i] * hW) / 300
-              const minY = Math.min(layer.sy[i], layer.sy[i + 1]) - 2,
-                maxY = Math.max(layer.sy[i], layer.sy[i + 1]) + 2
-              if (cp1y >= minY && cp1y <= maxY && cp2y >= minY && cp2y <= maxY)
-                ctx.bezierCurveTo(
-                  cp1x,
-                  cp1y,
-                  cp2x,
-                  cp2y,
-                  layer.sx[i + 1],
-                  layer.sy[i + 1],
+            ctx.moveTo(layer.sx[0], topPad)
+            ctx.lineTo(layer.sx[0], layer.sy[0])
+
+            if (layer.useLineTo) {
+              for (let i = 1; i < n; i++) ctx.lineTo(layer.sx[i], layer.sy[i])
+            } else {
+              for (let i = 0; i < n - 1; i++) {
+                const dx = layer.sx[i + 1] - layer.sx[i]
+                const cp1x = layer.sx[i] + dx / 3,
+                  cp1y = layer.sy[i] + (layer.tangents[i] * hW) / 300
+                const cp2x = layer.sx[i + 1] - dx / 3,
+                  cp2y = layer.sy[i + 1] - (layer.tangents[i] * hW) / 300
+                const minY = Math.min(layer.sy[i], layer.sy[i + 1]) - 2,
+                  maxY = Math.max(layer.sy[i], layer.sy[i + 1]) + 2
+                if (
+                  cp1y >= minY &&
+                  cp1y <= maxY &&
+                  cp2y >= minY &&
+                  cp2y <= maxY
                 )
-              else ctx.lineTo(layer.sx[i + 1], layer.sy[i + 1])
+                  ctx.bezierCurveTo(
+                    cp1x,
+                    cp1y,
+                    cp2x,
+                    cp2y,
+                    layer.sx[i + 1],
+                    layer.sy[i + 1],
+                  )
+                else ctx.lineTo(layer.sx[i + 1], layer.sy[i + 1])
+              }
             }
+            ctx.lineTo(layer.sx[n - 1], topPad)
             ctx.lineTo(visW, topPad)
+            ctx.lineTo(0, topPad)
             ctx.closePath()
             ctx.fill()
             ctx.restore()
           })
 
-          // Grid lines
+          // Vertical grid lines
+          const ticks = computeTimeTicks(w, sX, scX, state)
+
+          ctx.save()
+          ctx.strokeStyle = "rgba(129, 140, 248, 0.2)"
+          ctx.lineWidth = 1
+          ctx.setLineDash([20, 30])
+          for (let i = 0; i < ticks.length; i++) {
+            const x = ticks[i].x + sX
+            ctx.beginPath()
+            ctx.moveTo(x, topPad)
+            ctx.lineTo(x, h - botPad)
+            ctx.stroke()
+          }
+          ctx.restore()
+
+          // Horizontal grid lines
           ctx.strokeStyle = "rgba(255,255,255,0.04)"
           ctx.lineWidth = 1
           for (let y = topPad; y <= h - botPad; y += hW / 5) {
@@ -1307,7 +1498,6 @@
             ctx.stroke()
           }
 
-          // Determine lower/upper layers for thickness scaling
           const posLayers = layers.filter((l) => l.type === "pos")
           const freqLayers = layers.filter((l) => l.type === "freq")
           const bottomPosId = posLayers.length > 0 ? posLayers[0].id : null
@@ -1319,8 +1509,18 @@
             const lw = isBottom ? 3 : 1.6,
               ptR = isBottom ? 3.5 : 2
             ctx.strokeStyle = layer.info.color
-            drawCurve(ctx, layer.sx, layer.sy, layer.tangents, topPad, hW, lw)
-            if (state.showPoints) {
+            drawCurveOptimized(
+              ctx,
+              layer.sx,
+              layer.sy,
+              layer.tangents,
+              topPad,
+              hW,
+              lw,
+              layer.useLineTo,
+            )
+
+            if (state.showPoints && !layer.forceHidePoints) {
               ctx.fillStyle = layer.info.color
               for (let i = 0; i < layer.sx.length; i++) {
                 ctx.beginPath()
@@ -1346,10 +1546,14 @@
         }
         function updateTimelineFromScroll() {
           if (state.maxTime <= 0) return
-          const mT = state.maxTime * (1 - 1 / state.zoom)
-          els.timeline.value = Math.round(
-            ((state.scrollX * mT) / state.maxTime) * 10000,
-          )
+          const w = els.canvasA.width / (window.devicePixelRatio || 1)
+          const marginPx = w * 0.1
+          const visW = w * state.zoom
+          const sR = Math.max(1, visW - w + marginPx * 2)
+          const sX = state.scrollX * sR - marginPx
+          const scX = visW / state.maxTime
+          const tStart = sX / scX
+          els.timeline.value = Math.round((tStart / state.maxTime) * 10000)
           updateTime()
         }
 
@@ -1676,28 +1880,32 @@
             }),
           )
           if (!m) return alert("Import funscripts first")
-          
+
           const hwlData = {
             A: { hwlPos: [], hwlFreq: [] },
             B: { hwlPos: [], hwlFreq: [] },
           }
-          
+
           const f = state.options.freqAlgoHwl
-          
+
           ;["A", "B"].forEach((c) => {
             const fsPosData = state.channels[c].channelData.fsPos
             if (fsPosData?.length) {
               const seen = new Map()
-              fsPosData.forEach((p) => seen.set(Math.round(p.at / 25) * 25, p.pos))
+              fsPosData.forEach((p) =>
+                seen.set(Math.round(p.at / 25) * 25, p.pos),
+              )
               hwlData[c].hwlPos = Array.from(seen.entries())
                 .map(([at, pos]) => ({ at, pos: Math.round(pos) }))
                 .sort((a, b) => a.at - b.at)
             }
-            
+
             const fsFreqData = state.channels[c].channelData.fsFreq
             if (fsFreqData?.length) {
               const seen = new Map()
-              fsFreqData.forEach((p) => seen.set(Math.round(p.at / 25) * 25, p.pos))
+              fsFreqData.forEach((p) =>
+                seen.set(Math.round(p.at / 25) * 25, p.pos),
+              )
               hwlData[c].hwlFreq = Array.from(seen.entries())
                 .map(([at, pos]) => ({ at, pos: Math.round(pos) }))
                 .sort((a, b) => a.at - b.at)
@@ -1705,23 +1913,23 @@
               let fillValue = 0
               if (f === "fill50") fillValue = 50
               else if (f === "fill100") fillValue = 100
-              
+
               if (hwlData[c].hwlPos.length > 0) {
                 const startTime = hwlData[c].hwlPos[0].at
-                const endTime = hwlData[c].hwlPos[hwlData[c].hwlPos.length - 1].at
-                
+                const endTime =
+                  hwlData[c].hwlPos[hwlData[c].hwlPos.length - 1].at
+
                 for (let t = startTime; t <= endTime; t += 25) {
                   hwlData[c].hwlFreq.push({ at: t, pos: fillValue })
                 }
               }
             }
           })
-          
           ;["A", "B"].forEach((c) => {
             setChannelData(c, "hwlPos", hwlData[c].hwlPos)
             setChannelData(c, "hwlFreq", hwlData[c].hwlFreq)
           })
-          
+
           state.files.hwl = "from funscripts"
           document.getElementById("lbl-hwl").textContent = "from funscripts"
           state.files.hwlBase = null
@@ -1777,36 +1985,42 @@
             if (hwlPos?.length) m = Math.max(m, hwlPos[hwlPos.length - 1].at)
             if (hwlFreq?.length) m = Math.max(m, hwlFreq[hwlFreq.length - 1].at)
           })
-          
+
           if (!m) return alert("No HWL data to export")
-        
+
           const buf = new ArrayBuffer(8 + Math.floor(m / STEP_MS) * 16 + 16),
             dv = new DataView(buf)
           for (let h = 0; h < 8; h++) dv.setUint8(h, "YEAHBOI!".charCodeAt(h))
-        
+
           const getPosValue = (c, idx) => {
             const hwlData = state.channels[c].channelData.hwlPos
             if (hwlData && hwlData.length > 0) {
-              return Math.min(1, Math.max(0, getValueAt(hwlData, idx * 25) / 100))
+              return Math.min(
+                1,
+                Math.max(0, getValueAt(hwlData, idx * 25) / 100),
+              )
             }
             return 0
           }
-        
+
           const getFreqValue = (c, idx) => {
             const hwlData = state.channels[c].channelData.hwlFreq
             if (hwlData && hwlData.length > 0) {
-              return Math.min(1, Math.max(0, getValueAt(hwlData, idx * 25) / 100))
+              return Math.min(
+                1,
+                Math.max(0, getValueAt(hwlData, idx * 25) / 100),
+              )
             }
             return 0
           }
-        
+
           for (let idx = 0; idx <= m / STEP_MS; idx++) {
             dv.setFloat32(8 + idx * 16, getPosValue("A", idx), true)
             dv.setFloat32(12 + idx * 16, getPosValue("B", idx), true)
             dv.setFloat32(16 + idx * 16, getFreqValue("A", idx), true)
             dv.setFloat32(20 + idx * 16, getFreqValue("B", idx), true)
           }
-        
+
           const a = document.createElement("a")
           a.href = URL.createObjectURL(
             new Blob([buf], { type: "application/octet-stream" }),
@@ -2256,21 +2470,24 @@
             render()
           }
           document.getElementById("btn-zin").onclick = () => {
-            zoomAt(1.4, 0.5)
+            zoomAt(1.4, 0.5, els.canvasA.clientWidth)
             render()
           }
           document.getElementById("btn-zout").onclick = () => {
-            zoomAt(1 / 1.4, 0.5)
+            zoomAt(1 / 1.4, 0.5, els.canvasA.clientWidth)
             render()
           }
           els.timeline.oninput = () => {
             updateTime()
             if (state.maxTime <= 0) return
-            const mT = state.maxTime * (1 - 1 / state.zoom)
-            state.scrollX = Math.max(
-              0,
-              Math.min(1, ((els.timeline.value / 10000) * state.maxTime) / mT),
-            )
+            const w = els.canvasA.width / (window.devicePixelRatio || 1)
+            const marginPx = w * 0.1
+            const visW = w * state.zoom
+            const sR = Math.max(1, visW - w + marginPx * 2)
+            const scX = visW / state.maxTime
+            const tStart = (els.timeline.value / 10000) * state.maxTime
+            const sX = tStart * scX
+            state.scrollX = Math.max(0, Math.min(1, (sX + marginPx) / sR))
             render()
           }
           ;["A", "B"].forEach((ck) => {
@@ -2279,14 +2496,13 @@
               if (e.button !== 0) return
               const d = { sx: e.clientX, sc: state.scrollX }
               const m = (ev) => {
+                const w = wr.clientWidth
+                const marginPx = w * 0.1
+                const visW = w * state.zoom
+                const sR = Math.max(1, visW - w + marginPx * 2)
                 state.scrollX = Math.max(
                   0,
-                  Math.min(
-                    1,
-                    d.sc -
-                      (ev.clientX - d.sx) /
-                        Math.max(1, (state.zoom - 1) * wr.clientWidth),
-                  ),
+                  Math.min(1, d.sc - (ev.clientX - d.sx) / sR),
                 )
                 updateTimelineFromScroll()
                 render()
@@ -2306,7 +2522,7 @@
                   mouseRatio = (e.clientX - rect.left) / rect.width
                 const dir = e.deltaY < 0 ? 1 : -1,
                   dynMul = Math.max(0.05, 0.3 / Math.sqrt(state.zoom))
-                zoomAt(1 + dir * dynMul, mouseRatio)
+                zoomAt(1 + dir * dynMul, mouseRatio, rect.width)
                 render()
               },
               { passive: false },
