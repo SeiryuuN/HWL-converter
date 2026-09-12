@@ -590,6 +590,7 @@
                 <option value="fill0">Freq: 0</option>
                 <option value="fill50">Freq: 50</option>
                 <option value="fill100">Freq: 100</option>
+                <option value="restim">Restim funscripts</option>
               </select>
               <button
                 class="btn btn-small btn-convert"
@@ -605,7 +606,7 @@
           <div class="section">
             <div class="section-title">Funscript A</div>
             <div class="sub-row">
-              <span class="sub-label">Position</span
+              <span class="sub-label">Position/Alpha</span
               ><span class="file-label" id="lbl-fsA-pos">empty</span>
             </div>
             <div class="row">
@@ -666,7 +667,7 @@
           <div class="section">
             <div class="section-title">Funscript B</div>
             <div class="sub-row">
-              <span class="sub-label">Position</span
+              <span class="sub-label">Position/Beta</span
               ><span class="file-label" id="lbl-fsB-pos">empty</span>
             </div>
             <div class="row">
@@ -692,7 +693,7 @@
             </div>
             <div class="sub-separator"></div>
             <div class="sub-row">
-              <span class="sub-label">Frequency</span
+              <span class="sub-label">Frequency/Volume</span
               ><span class="file-label" id="lbl-fsB-freq">empty</span>
             </div>
             <div class="row">
@@ -1870,8 +1871,126 @@
           }))
         }
 
+        function convertRestimToHWL() {
+          const alphaData = state.channels.A.channelData.fsPos
+          const betaData = state.channels.B.channelData.fsPos
+          const freqData = state.channels.A.channelData.fsFreq
+          const volumeData = state.channels.B.channelData.fsFreq
+
+          let m = 0
+          ;[alphaData, betaData, freqData, volumeData].forEach((d) => {
+            if (d?.length) m = Math.max(m, d[d.length - 1].at)
+          })
+          if (!m)
+            return alert(
+              "Import Restim funscripts first: alpha, beta, frequency, volume",
+            )
+
+          const steps = Math.floor(m / STEP_MS)
+          const rawA = [],
+            rawB = [],
+            rawF = []
+
+          for (let i = 0; i <= steps; i++) {
+            const t = i * STEP_MS
+            const alphaRaw = alphaData?.length ? getValueAt(alphaData, t) : 50
+            const betaRaw = betaData?.length ? getValueAt(betaData, t) : 50
+            const freqRaw = freqData?.length ? getValueAt(freqData, t) : 50
+            const volumeRaw = volumeData?.length
+              ? getValueAt(volumeData, t)
+              : 100
+
+            const alpha = Math.max(-1, Math.min(1, (alphaRaw - 50) / 50))
+            const beta = Math.max(-1, Math.min(1, (betaRaw - 50) / 50))
+            const volume = Math.max(0, Math.min(1, volumeRaw / 100))
+            const pulseFreq = Math.max(0, Math.min(1, freqRaw / 100))
+
+            const [ampA, ampB] = restimChannelAmplitudes(alpha, beta)
+            rawA.push(volume * ampA)
+            rawB.push(volume * ampB)
+            rawF.push(pulseFreq)
+          }
+
+          const p99 = (arr) => {
+            if (!arr.length) return 0.001
+            const s = [...arr].sort((x, y) => x - y)
+            return s[Math.floor(s.length * 0.99)] || 0.001
+          }
+          const nA = p99(rawA),
+            nB = p99(rawB),
+            nF = p99(rawF)
+
+          const hwlData = {
+            A: { hwlPos: [], hwlFreq: [] },
+            B: { hwlPos: [], hwlFreq: [] },
+          }
+          for (let i = 0; i <= steps; i++) {
+            const t = i * STEP_MS
+            const posA = Math.round(
+              Math.max(0, Math.min(100, (rawA[i] / nA) * 100)),
+            )
+            const posB = Math.round(
+              Math.max(0, Math.min(100, (rawB[i] / nB) * 100)),
+            )
+
+            const frq = Math.round(
+              Math.max(0, Math.min(100, (rawF[i] / nF) * 100)),
+            )
+
+            hwlData.A.hwlPos.push({ at: t, pos: posA })
+            hwlData.B.hwlPos.push({ at: t, pos: posB })
+            hwlData.A.hwlFreq.push({ at: t, pos: frq })
+            hwlData.B.hwlFreq.push({ at: t, pos: frq })
+          }
+
+          ;["A", "B"].forEach((c) => {
+            setChannelData(
+              c,
+              "hwlPos",
+              simplify(hwlData[c].hwlPos, state.options.tolerance),
+            )
+            setChannelData(
+              c,
+              "hwlFreq",
+              simplify(hwlData[c].hwlFreq, state.options.tolerance),
+            )
+          })
+
+          state.files.hwl = "from restim coyote"
+          document.getElementById("lbl-hwl").textContent = "from restim coyote"
+          state.files.hwlBase = null
+          updateMaxTime()
+          render()
+        }
+
+        function restimChannelAmplitudes(alpha, beta) {
+          const r = Math.min(1, Math.hypot(alpha, beta))
+          const t11 = (2 - r + alpha) / 2
+          const t12 = -beta / 2
+          const t21 = t12
+          const t22 = (2 - r - alpha) / 2
+          const k = 1 / Math.sqrt(3)
+          const s = Math.sqrt(3) / 2
+          const m0 = [k * t11, k * t12]
+          const m1 = [
+            -0.5 * k * t11 + s * k * t21,
+            -0.5 * k * t12 + s * k * t22,
+          ]
+          const m2 = [
+            -0.5 * k * t11 - s * k * t21,
+            -0.5 * k * t12 - s * k * t22,
+          ]
+          const cA = [m0[0] - m1[0], m0[1] - m1[1]]
+          const cB = [m0[0] - m2[0], m0[1] - m2[1]]
+          return [Math.hypot(cA[0], cA[1]), Math.hypot(cB[0], cB[1])]
+        }
+
         // Generate HWL by resampling funscript to 25ms grid
         function generateHWLFromFS() {
+          if (state.options.freqAlgoHwl === "restim") {
+            return convertRestimToHWL()
+          }
+
           let m = 0
           ;["A", "B"].forEach((c) =>
             ["fsPos", "fsFreq"].forEach((k) => {
